@@ -18,3 +18,10 @@ st.set_page_config(page_title="tripcrew", layout="centered")
 
 st.title("tripcrew")
 st.caption("Tell it where you want to go. It'll ask if it needs more.")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])

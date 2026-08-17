@@ -22,3 +22,9 @@ def test_budget_recompute_ignores_a_stale_total():
     budget = Budget(flights_usd=100, hotel_usd=100, attractions_usd=0, total_usd=999999)
     budget.recompute()
     assert budget.total_usd == 200
+
+
+def test_trip_plan_defaults_to_no_open_questions():
+    plan = TripPlan(destination="Paris", days=3)
+    assert plan.open_questions == []
+    assert plan.flights == []

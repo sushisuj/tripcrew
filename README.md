@@ -26,3 +26,26 @@ The agent itself is wired up (`tripcrew/agent.py`) but the multi-turn
 clarification loop, the part that actually lets it pause and ask "what
 dates?" instead of guessing, isn't built yet. `tripcrew/app.py` is a
 Streamlit skeleton, not a working chat flow.
+
+## Where this is headed
+
+The plan, in rough order:
+
+1. The clarification loop and the full plan-tools-evaluate-respond cycle,
+   actually working end to end on mocked flight/hotel data.
+2. Basic error handling for tool and API failures, so a missing weather
+   result degrades to "weather unavailable" instead of crashing the run.
+3. Exporting the finished itinerary to PDF.
+4. A follow-up step where that PDF becomes something you can ask questions
+   about, reusing document Q&A ideas from a separate project rather than
+   the RAG chatbot itself. A single generated itinerary is small enough
+   that this probably means putting it directly in context, not standing
+   up a vector store for a two-page document. Worth deciding deliberately
+   rather than defaulting to whichever approach is already lying around.
+5. Testing, properly. `evaluation/README.md` lays out why promptfoo and
+   deepeval are scoped to different layers (agent behavior versus answer
+   quality) instead of picking one and using it for both.
+
+Nothing above is committed to landing in that exact order. It's the
+intention, written down so it doesn't drift, not a promise about what's
+finished by any particular date.

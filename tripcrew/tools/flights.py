@@ -20,3 +20,23 @@ from crewai.tools import tool
 from tripcrew.schemas import Flight
 
 _MOCK_AIRLINES = ["Air France", "British Airways", "Lufthansa", "KLM"]
+
+
+@tool("Flight Search")
+def search_flights(origin: str, destination: str, departure_date: str) -> list[Flight]:
+    """Search for flights between two cities on a given date.
+
+    Returns mocked options for now -- source is always "mocked" so nothing
+    downstream can mistake this for real pricing.
+    """
+    return [
+        Flight(
+            origin=origin,
+            destination=destination,
+            departure_date=departure_date,
+            airline=random.choice(_MOCK_AIRLINES),
+            price_usd=round(random.uniform(250, 900), 2),
+            source="mocked",
+        )
+        for _ in range(3)
+    ]

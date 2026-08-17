@@ -17,3 +17,15 @@ attractions are interdependent (a hotel choice depends on flight dates
 landing the trip in a particular window; weather can inform which
 attractions make sense), so one agent reasoning step by step matches the
 project brief's own language more literally than parallel specialists would.
+
+Why flights and hotels are mocked
+------------------------------------
+
+Real live-price flight and hotel APIs (Skyscanner, Kiwi, Booking.com) gate
+access behind a business-partner approval process with no published
+timeline -- not workable against a deadline. Amadeus's self-service sandbox
+is the realistic path if genuine API integration happens later, but its
+free tier returns test data, not live prices, so even that wouldn't be live
+pricing. For now, ``tripcrew/tools/flights.py`` and ``tripcrew/tools/hotels.py``
+return mocked data shaped exactly like a real response, so swapping the
+implementation later doesn't require touching anything that calls them.

@@ -33,3 +33,29 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   something's mocked, say it's mocked and say why. Honesty about what's not
   built yet is worth more than a confident-sounding README that overstates
   what's working.
+
+## Project conventions
+
+- Tool outputs are pydantic models (see `tripcrew/schemas.py`), not free
+  text. This is what makes "evaluate the results" in the agent loop an
+  actual step instead of a formality.
+- Every model with a `source` field (`Flight`, `Hotel`) must be honest about
+  where the data came from. `"mocked"` is a valid, expected value right
+  now. It is not something to hide or work around.
+- Don't let an LLM state a derived number (a total, a sum) and trust it.
+  Compute it from the parts in code, the way `Budget.recompute()` does. This
+  is a direct lesson from a real hallucination caught in the Constellate
+  project: word-overlap or vocabulary-based checks catch missing terms, not
+  wrong claims. The fix that actually works is not trusting the model for
+  anything checkable by other means.
+- Flights and hotels are mocked on purpose, not by oversight. See
+  `docs/architecture.rst` for why (Skyscanner/Kiwi/Booking.com require
+  business-partner approval with no workable timeline; Amadeus's free tier
+  is sandbox data, not live pricing). Don't "fix" this by silently wiring in
+  a real API without updating that doc and the `source` field values.
+- Keep `.env` out of git. `.env.example` documents the shape without real
+  keys. This has already gone wrong once in a different project on this
+  account. Don't repeat it here.
+- New tools should follow the shape already in `tripcrew/tools/`: a single
+  `@tool`-decorated function, a pydantic return type from `schemas.py`, and
+  a docstring that says what's real versus what's a placeholder.

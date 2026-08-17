@@ -39,3 +39,12 @@ def test_flight_requires_a_source():
         source="mocked",
     )
     assert flight.source == "mocked"
+
+
+def test_hotel_and_attraction_construct_with_minimal_fields():
+    hotel = Hotel(
+        name="Test Hotel", city="Paris", check_in="2026-09-01", check_out="2026-09-04", source="mocked"
+    )
+    attraction = Attraction(name="Louvre", city="Paris")
+    assert hotel.price_per_night_usd is None
+    assert attraction.estimated_cost_usd is None

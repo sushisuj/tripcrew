@@ -21,3 +21,14 @@ class Flight(BaseModel):
     source: Literal["mocked", "aviationstack", "amadeus"] = Field(
         description="Where this data actually came from -- keep this honest, not decorative"
     )
+
+
+class Hotel(BaseModel):
+    name: str
+    city: str
+    check_in: str = Field(description="ISO date")
+    check_out: str = Field(description="ISO date")
+    price_per_night_usd: Optional[float] = Field(default=None)
+    source: Literal["mocked", "amadeus"] = Field(
+        description="Where this data actually came from"
+    )

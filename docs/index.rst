@@ -8,3 +8,10 @@ asks you directly when something's missing instead of guessing.
 This documentation is a skeleton right now, built alongside the codebase
 rather than after it -- sections exist even where the content doesn't yet,
 so nothing gets forgotten once there's more to write.
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents
+
+   getting-started
+   architecture

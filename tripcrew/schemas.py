@@ -32,3 +32,10 @@ class Hotel(BaseModel):
     source: Literal["mocked", "amadeus"] = Field(
         description="Where this data actually came from"
     )
+
+
+class Attraction(BaseModel):
+    name: str
+    city: str
+    category: Optional[str] = Field(default=None, description="e.g. museum, park, landmark")
+    estimated_cost_usd: Optional[float] = Field(default=None)

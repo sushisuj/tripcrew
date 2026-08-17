@@ -39,3 +39,9 @@ class Attraction(BaseModel):
     city: str
     category: Optional[str] = Field(default=None, description="e.g. museum, park, landmark")
     estimated_cost_usd: Optional[float] = Field(default=None)
+
+
+class WeatherReport(BaseModel):
+    city: str
+    date: str = Field(description="ISO date")
+    summary: str = Field(description="Short human-readable forecast, e.g. 'light rain, 14C'")

@@ -15,3 +15,9 @@ deepeval tests answer quality once the PDF-to-chatbot handoff exists:
 faithfulness of an answer to the generated itinerary, basically a more
 rigorous version of the groundedness guardrail already built for
 Constellate.
+
+Using both for the same thing would be redundant, since they're
+deliberately scoped to different layers of the system.
+
+Nothing here is implemented yet. This file exists so the intent isn't lost
+between now and when there's an actual planning loop worth evaluating.

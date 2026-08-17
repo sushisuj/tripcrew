@@ -4,3 +4,5 @@ litellm
 python-dotenv
 streamlit
 requests
+pydantic
+pytest

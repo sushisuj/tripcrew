@@ -13,3 +13,12 @@ def test_budget_recompute_sums_the_parts():
     budget = Budget(flights_usd=500, hotel_usd=300, attractions_usd=50)
     budget.recompute()
     assert budget.total_usd == 850
+
+
+def test_budget_recompute_ignores_a_stale_total():
+    # If something upstream (an LLM, a bad merge) sets total_usd directly,
+    # recompute() should override it rather than trust it -- that's the
+    # whole point of the function.
+    budget = Budget(flights_usd=100, hotel_usd=100, attractions_usd=0, total_usd=999999)
+    budget.recompute()
+    assert budget.total_usd == 200

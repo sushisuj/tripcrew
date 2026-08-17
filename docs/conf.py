@@ -8,3 +8,9 @@ project = "tripcrew"
 copyright = "2026, Sujan"
 author = "Sujan"
 release = "0.0.1"
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+]

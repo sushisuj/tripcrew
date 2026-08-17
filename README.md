@@ -12,3 +12,17 @@ that's actually the sum of what the tools returned, not a number an LLM
 made up). That loop, understand the goal, plan the steps, pick and use
 tools, check the results, answer, is the actual point of the project. A
 chatbot that already knows the steps isn't demonstrating it.
+
+## Current state
+
+Early. The package structure, schemas, and tool interfaces exist. Weather
+and attractions call real APIs (OpenWeatherMap, OpenTripMap). Flights and
+hotels are mocked on purpose, not by oversight, because the APIs with real
+live pricing gate access behind a business-partner approval process that
+doesn't clear on a reasonable timeline. See `docs/architecture.rst` for the
+full reasoning and what the realistic path forward looks like.
+
+The agent itself is wired up (`tripcrew/agent.py`) but the multi-turn
+clarification loop, the part that actually lets it pause and ask "what
+dates?" instead of guessing, isn't built yet. `tripcrew/app.py` is a
+Streamlit skeleton, not a working chat flow.

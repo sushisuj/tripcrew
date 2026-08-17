@@ -33,3 +33,12 @@ Running tests
 .. code-block:: bash
 
    pytest
+
+Known gotchas
+--------------
+
+Not many yet -- this project is young. The one already inherited from the
+code-review-crew project: the LLM model string needs the ``openai/`` prefix
+(``openai/meta/llama-3.1-8b-instruct``) or LiteLLM matches it against Meta's
+own hosted API instead of NVIDIA's, and auth fails. Already handled in
+``tripcrew/agent.py``, documented here so it isn't rediscovered.

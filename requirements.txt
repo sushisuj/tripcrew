@@ -2,3 +2,5 @@ crewai
 crewai-tools
 litellm
 python-dotenv
+streamlit
+requests

@@ -45,3 +45,20 @@ class WeatherReport(BaseModel):
     city: str
     date: str = Field(description="ISO date")
     summary: str = Field(description="Short human-readable forecast, e.g. 'light rain, 14C'")
+
+
+class Budget(BaseModel):
+    flights_usd: float = 0
+    hotel_usd: float = 0
+    attractions_usd: float = 0
+    total_usd: float = 0
+
+    def recompute(self) -> "Budget":
+        """Recompute total from the parts instead of trusting a model-written number.
+
+        This is the cheap, non-LLM sanity check Constellate's groundedness bug
+        should have taught us to always add: don't let the agent state a total,
+        derive it.
+        """
+        self.total_usd = self.flights_usd + self.hotel_usd + self.attractions_usd
+        return self

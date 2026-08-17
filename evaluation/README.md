@@ -10,3 +10,8 @@ input. This is the direct follow-up to a real problem hit on the
 code-review-crew project, where the same file and same prompts gave
 different findings between runs. That's not something you catch by
 eyeballing output once.
+
+deepeval tests answer quality once the PDF-to-chatbot handoff exists:
+faithfulness of an answer to the generated itinerary, basically a more
+rigorous version of the groundedness guardrail already built for
+Constellate.

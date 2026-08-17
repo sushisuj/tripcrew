@@ -26,3 +26,10 @@ Running the app
 .. code-block:: bash
 
    streamlit run tripcrew/app.py
+
+Running tests
+--------------
+
+.. code-block:: bash
+
+   pytest

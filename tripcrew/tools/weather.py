@@ -45,3 +45,19 @@ def get_weather(city: str, date: str) -> WeatherReport:
             "OPENWEATHER_API_KEY not set. This should surface to the agent as "
             "a tool failure to handle, not crash the whole crew."
         )
+
+    lat, lon = _geocode(city)
+    response = requests.get(
+        f"{OPENWEATHER_BASE}/forecast",
+        params={"lat": lat, "lon": lon, "appid": api_key, "units": "metric"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    # TODO: match the closest forecast entry to `date` instead of just
+    # grabbing the first one. Placeholder for now -- start small.
+    first = data["list"][0]
+    summary = f"{first['weather'][0]['description']}, {first['main']['temp']}C"
+
+    return WeatherReport(city=city, date=date, summary=summary)

@@ -62,3 +62,18 @@ class Budget(BaseModel):
         """
         self.total_usd = self.flights_usd + self.hotel_usd + self.attractions_usd
         return self
+
+
+class TripPlan(BaseModel):
+    destination: str
+    days: int
+    flights: list[Flight] = Field(default_factory=list)
+    hotel: Optional[Hotel] = None
+    attractions: list[Attraction] = Field(default_factory=list)
+    weather: list[WeatherReport] = Field(default_factory=list)
+    budget: Budget = Field(default_factory=Budget)
+    open_questions: list[str] = Field(
+        default_factory=list,
+        description="Anything the agent needed from the user but didn't have -- "
+        "populated instead of guessing",
+    )

@@ -28,3 +28,14 @@ def test_trip_plan_defaults_to_no_open_questions():
     plan = TripPlan(destination="Paris", days=3)
     assert plan.open_questions == []
     assert plan.flights == []
+
+
+def test_flight_requires_a_source():
+    flight = Flight(
+        origin="LHR",
+        destination="CDG",
+        departure_date="2026-09-01",
+        price_usd=200,
+        source="mocked",
+    )
+    assert flight.source == "mocked"

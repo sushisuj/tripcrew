@@ -25,3 +25,21 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
+
+prompt = st.chat_input("Plan a trip...")
+
+if prompt:
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.write(prompt)
+
+    with st.chat_message("assistant"):
+        st.warning(
+            "Planning loop not wired up yet -- this is a skeleton. "
+            "build_planner_agent() exists but nothing calls it end-to-end "
+            "with the clarification flow yet."
+        )
+
+    st.session_state.messages.append(
+        {"role": "assistant", "content": "(planning loop not implemented yet)"}
+    )

@@ -36,3 +36,24 @@ def build_llm() -> LLM:
         base_url=os.getenv("OPENAI_API_BASE"),
         api_key=os.getenv("OPENAI_API_KEY"),
     )
+
+
+def build_planner_agent() -> Agent:
+    llm = build_llm()
+    return Agent(
+        role="Travel Planner",
+        goal=(
+            "Turn a high-level trip request into a concrete, practical plan by "
+            "deciding which tools to call and in what order, then evaluating "
+            "what they return before answering."
+        ),
+        backstory=(
+            "An experienced trip planner who never invents a flight, hotel, or "
+            "price -- only reports what the tools actually returned, and asks "
+            "the traveler directly when something essential (origin city, "
+            "dates, budget) is missing instead of guessing."
+        ),
+        tools=[search_flights, search_hotels, get_weather, get_attractions],
+        llm=llm,
+        verbose=True,
+    )

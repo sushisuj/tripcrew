@@ -49,3 +49,15 @@ The plan, in rough order:
 Nothing above is committed to landing in that exact order. It's the
 intention, written down so it doesn't drift, not a promise about what's
 finished by any particular date.
+
+## Setup
+
+See `docs/getting-started.rst` for the full walkthrough. Short version:
+
+```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # then fill in real keys
+streamlit run tripcrew/app.py
+```

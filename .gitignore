@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# tripcrew-specific
+docs/_build/
+.streamlit/
+
+# tripcrew-specific
+docs/_build/

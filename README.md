@@ -61,3 +61,9 @@ pip install -r requirements.txt
 cp .env.example .env  # then fill in real keys
 streamlit run tripcrew/app.py
 ```
+
+## Docs
+
+Full documentation lives under `docs/` (Sphinx, set up for Read the Docs,
+not yet confirmed live). Also skeletal right now, built alongside the code
+instead of after it.

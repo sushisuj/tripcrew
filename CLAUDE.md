@@ -59,3 +59,18 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
 - New tools should follow the shape already in `tripcrew/tools/`: a single
   `@tool`-decorated function, a pydantic return type from `schemas.py`, and
   a docstring that says what's real versus what's a placeholder.
+
+## Not built yet (don't assume these exist)
+
+- The multi-turn clarification loop (the agent asking for missing info and
+  waiting for an answer). `tripcrew/app.py` is a UI skeleton only.
+- Error handling for tool/API failures beyond raising an exception.
+- PDF export of the finished plan.
+- The optional follow-up chatbot that would answer questions about a
+  generated plan (would reuse ideas from the Constellate project, but
+  should not naively import its full RAG pipeline. A single generated
+  itinerary is small enough to put directly in context, no vector search
+  needed, unless there's a specific reason to demonstrate the RAG stack
+  again deliberately).
+- promptfoo and deepeval test suites (see `evaluation/README.md` for the
+  intended split between them).

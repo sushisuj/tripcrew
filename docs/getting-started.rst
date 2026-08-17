@@ -19,3 +19,10 @@ shape) with your own API keys:
    OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
    OPENWEATHER_API_KEY=<openweathermap-key>
    OPENTRIPMAP_API_KEY=<opentripmap-key>
+
+Running the app
+----------------
+
+.. code-block:: bash
+
+   streamlit run tripcrew/app.py

@@ -223,3 +223,4 @@ docs/_build/
 
 # tripcrew-specific
 docs/_build/
+.streamlit/

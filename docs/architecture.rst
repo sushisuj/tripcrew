@@ -29,3 +29,12 @@ free tier returns test data, not live prices, so even that wouldn't be live
 pricing. For now, ``tripcrew/tools/flights.py`` and ``tripcrew/tools/hotels.py``
 return mocked data shaped exactly like a real response, so swapping the
 implementation later doesn't require touching anything that calls them.
+
+Not yet designed
+-------------------
+
+- The multi-turn clarification loop (asking for origin city, dates, or
+  budget when missing, then resuming with the answer)
+- Error handling for tool/API failures beyond raising
+- The PDF export step
+- Whether/how the plan hands off to a document Q&A chatbot afterward

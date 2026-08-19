@@ -60,17 +60,31 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   `@tool`-decorated function, a pydantic return type from `schemas.py`, and
   a docstring that says what's real versus what's a placeholder.
 
+## Architecture note: multi-agent, not single-agent
+
+The agent layer was originally a single agent with four tools. That's
+been superseded. The actual design is a five-role crew under
+`Process.sequential` (intake/coordinator, itinerary research, food
+research, consolidation, presentation), described in full in
+`docs/architecture.rst`. Don't rebuild the single-agent version, and don't
+assume `tripcrew/agent.py` still matches this file's own earlier
+description of it, check the current code and `docs/architecture.rst`
+directly.
+
 ## Not built yet (don't assume these exist)
 
-- The multi-turn clarification loop (the agent asking for missing info and
-  waiting for an answer). `tripcrew/app.py` is a UI skeleton only.
+- The multi-turn clarification loop (the intake agent asking for missing
+  info and waiting for an answer). `tripcrew/app.py` is a UI skeleton only.
+- The five-agent crew itself. Currently four roles are planned for the
+  first pass, food research is deferred until its tool exists.
+- The food/restaurant search tool (planned: OpenTripMap, same pattern as
+  `attractions.py`, different `kinds` filter).
 - Error handling for tool/API failures beyond raising an exception.
 - PDF export of the finished plan.
-- The optional follow-up chatbot that would answer questions about a
-  generated plan (would reuse ideas from the Constellate project, but
-  should not naively import its full RAG pipeline. A single generated
-  itinerary is small enough to put directly in context, no vector search
-  needed, unless there's a specific reason to demonstrate the RAG stack
-  again deliberately).
+- The follow-up chatbot, now planned as a knowledge graph over the
+  generated `TripPlan` (graph traversal, not an LLM call, not a RAG
+  pipeline), explicitly a separate later phase. See
+  `docs/architecture.rst` for why this is a better fit than reusing
+  Constellate's RAG stack.
 - promptfoo and deepeval test suites (see `evaluation/README.md` for the
   intended split between them).

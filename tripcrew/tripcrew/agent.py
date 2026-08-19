@@ -14,6 +14,7 @@ documented on the code-review-crew project. A fixed, predictable pipeline
 is easier to debug when a task's output is wrong.
 """
 
+import crewai.llms.cache as _crewai_cache
 from crewai import LLM, Agent, Crew, Process, Task
 
 from tripcrew.schemas import TripPlan
@@ -22,6 +23,19 @@ from tripcrew.tools.budget import estimate_budget
 from tripcrew.tools.flights import search_flights
 from tripcrew.tools.hotels import search_hotels
 from tripcrew.tools.weather import get_weather
+
+# CrewAI (as of 1.15.x) unconditionally tags every message with a
+# cache_breakpoint flag meant only for Anthropic's prompt-caching API, then
+# sends that same flag to whatever provider is actually configured. Groq's
+# API validates message schemas strictly and 400s on the unrecognized
+# field: "property 'cache_breakpoint' is unsupported". Known upstream bug,
+# github.com/crewAIInc/crewAI/issues/5886, fix PRs open but not merged as
+# of this writing. This is the workaround from that issue: replace the
+# tagging function with a no-op. Safe as long as the LLM stays on Groq (or
+# any non-Anthropic provider); if this project ever switches back to an
+# Anthropic model, remove this patch first or prompt caching silently
+# stops working for it too.
+_crewai_cache.mark_cache_breakpoint = lambda msg: msg
 
 
 def build_llm() -> LLM:

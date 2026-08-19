@@ -15,8 +15,7 @@ shape) with your own API keys:
 
 .. code-block:: text
 
-   OPENAI_API_KEY=<nvidia-nim-key>
-   OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
+   GROQ_API_KEY=<groq-key>
    OPENWEATHER_API_KEY=<openweathermap-key>
    OPENTRIPMAP_API_KEY=<opentripmap-key>
 
@@ -37,8 +36,13 @@ Running tests
 Known gotchas
 --------------
 
-Not many yet -- this project is young. The one already inherited from the
-code-review-crew project: the LLM model string needs the ``openai/`` prefix
-(``openai/meta/llama-3.1-8b-instruct``) or LiteLLM matches it against Meta's
-own hosted API instead of NVIDIA's, and auth fails. Already handled in
-``tripcrew/agent.py``, documented here so it isn't rediscovered.
+The LLM is Groq, via LiteLLM's native ``groq/`` provider prefix, not the
+NVIDIA NIM setup this project started with. No ``base_url`` needed, LiteLLM
+knows Groq's endpoint already, just ``GROQ_API_KEY`` in the environment.
+The model is ``openai/gpt-oss-20b`` -- yes, with an ``openai/`` in the name,
+that's Groq's own naming for one of their hosted models, unrelated to
+LiteLLM's provider-prefix syntax. Check Groq's deprecation page
+(``console.groq.com/docs/deprecations``) before assuming a model name from
+memory or an old tutorial still works, several previously-obvious choices
+(``llama-3.1-8b-instant``, ``llama-3.3-70b-versatile``) were retired
+08/16/26.

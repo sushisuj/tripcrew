@@ -14,8 +14,6 @@ documented on the code-review-crew project. A fixed, predictable pipeline
 is easier to debug when a task's output is wrong.
 """
 
-import os
-
 from crewai import LLM, Agent, Crew, Process, Task
 
 from tripcrew.schemas import TripPlan
@@ -27,16 +25,16 @@ from tripcrew.tools.weather import get_weather
 
 
 def build_llm() -> LLM:
-    """Same NVIDIA NIM setup as the code-review-crew project, gotchas already paid for:
+    """Switched from NVIDIA NIM to Groq. LiteLLM has native Groq support, no
+    base_url/api_key wrangling needed, just the `groq/` provider prefix and
+    a GROQ_API_KEY in the environment (see .env.example).
 
-    the `openai/` prefix forces LiteLLM's generic OpenAI-compatible path instead
-    of matching "meta/..." against Meta's own hosted API and failing auth.
+    Model is Groq's own recommended replacement for llama-3.1-8b-instant,
+    which was deprecated 08/16/26 -- the obvious small/fast Llama model
+    isn't actually the one to reach for anymore. Confirmed against Groq's
+    current model list before wiring it in, not assumed from memory.
     """
-    return LLM(
-        model="openai/meta/llama-3.1-8b-instruct",
-        base_url=os.getenv("OPENAI_API_BASE"),
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
+    return LLM(model="groq/openai/gpt-oss-20b")
 
 
 def build_intake_agent() -> Agent:

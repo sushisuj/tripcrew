@@ -209,7 +209,10 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
         description=(
             "Turn the consolidated TripPlan into a clear, practical "
             "write-up for the traveler. Present exactly what's in the "
-            "plan, don't add details the plan doesn't contain."
+            "plan, don't add details the plan doesn't contain. If "
+            "budget.unpriced_categories isn't empty, say plainly that the "
+            "total doesn't include those categories, don't present it as a "
+            "complete number."
         ),
         expected_output=(
             "A readable trip plan write-up covering flights, hotel, "

@@ -6,14 +6,17 @@ clarification loop; itinerary research owns attractions and weather;
 consolidation merges everything into a TripPlan with a computed budget;
 presentation formats the result for the user.
 
-This file defines the agents and their chained tasks, one builder function
-each, context passed from each task to the next. The Process.sequential
-Crew assembly itself isn't wired up yet -- that's the next piece.
+This file defines the agents, their chained tasks, and the Crew that runs
+them under Process.sequential. Sequential over hierarchical is deliberate,
+see docs/architecture.rst: a manager agent dynamically delegating adds a
+second unreliable decision on top of per-task reliability problems already
+documented on the code-review-crew project. A fixed, predictable pipeline
+is easier to debug when a task's output is wrong.
 """
 
 import os
 
-from crewai import LLM, Agent, Task
+from crewai import LLM, Agent, Crew, Process, Task
 
 from tripcrew.schemas import TripPlan
 from tripcrew.tools.attractions import get_attractions
@@ -192,4 +195,29 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
         ),
         agent=agent,
         context=[consolidation_task],
+    )
+
+
+def build_crew() -> Crew:
+    """Assembles all four agents and their chained tasks into a
+    Process.sequential Crew. This is what app.py should call, not the
+    individual builder functions above -- those exist mainly so this
+    function and tests can construct pieces independently.
+    """
+    intake_agent = build_intake_agent()
+    itinerary_agent = build_itinerary_agent()
+    consolidation_agent = build_consolidation_agent()
+    presentation_agent = build_presentation_agent()
+
+    intake_task = build_intake_task(intake_agent)
+    itinerary_task = build_itinerary_task(itinerary_agent, intake_task)
+    consolidation_task = build_consolidation_task(consolidation_agent, intake_task, itinerary_task)
+    presentation_task = build_presentation_task(presentation_agent, consolidation_task)
+
+    return Crew(
+        agents=[intake_agent, itinerary_agent, consolidation_agent, presentation_agent],
+        tasks=[intake_task, itinerary_task, consolidation_task, presentation_task],
+        process=Process.sequential,
+        tracing=False,
+        verbose=True,
     )

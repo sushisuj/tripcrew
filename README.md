@@ -15,33 +15,37 @@ chatbot that already knows the steps isn't demonstrating it.
 
 ## Current state
 
-Early. The package structure, schemas, and tool interfaces exist. Weather
-and attractions call real APIs (OpenWeatherMap, OpenTripMap). Flights and
-hotels are mocked on purpose, not by oversight, because the APIs with real
-live pricing gate access behind a business-partner approval process that
-doesn't clear on a reasonable timeline. See `docs/architecture.rst` for the
-full reasoning and what the realistic path forward looks like.
+The planner works end to end on mocked flight and hotel data. Four agents,
+not the five originally sketched, food research is deferred until its tool
+exists (see `docs/architecture.rst`): an intake agent that asks for
+whatever's missing (origin city, dates, budget) before anything else runs,
+an itinerary agent that pulls real attractions and weather, a consolidator
+that builds the final plan with a budget computed from the actual numbers,
+and a presenter that writes it up. `tripcrew/app.py` is a working
+Streamlit chat, not a skeleton, it runs a cheap intake-only check first and
+only kicks off the full crew once it has enough to work with.
 
-The agent itself is wired up (`tripcrew/agent.py`) but the multi-turn
-clarification loop, the part that actually lets it pause and ask "what
-dates?" instead of guessing, isn't built yet. `tripcrew/app.py` is a
-Streamlit skeleton, not a working chat flow.
+Weather and attractions call real APIs (OpenWeatherMap, OpenTripMap).
+Flights and hotels are mocked on purpose, not by oversight, because the
+APIs with real live pricing gate access behind a business-partner approval
+process that doesn't clear on a reasonable timeline. See
+`docs/architecture.rst` for the full reasoning and what the realistic path
+forward looks like.
 
 ## Where this is headed
 
 The plan, in rough order:
 
-1. The clarification loop and the full plan-tools-evaluate-respond cycle,
-   actually working end to end on mocked flight/hotel data.
-2. Basic error handling for tool and API failures, so a missing weather
+1. Basic error handling for tool and API failures, so a missing weather
    result degrades to "weather unavailable" instead of crashing the run.
+2. The food research agent and its tool, once it's worth the second
+   OpenTripMap integration.
 3. Exporting the finished itinerary to PDF.
-4. A follow-up step where that PDF becomes something you can ask questions
-   about, reusing document Q&A ideas from a separate project rather than
-   the RAG chatbot itself. A single generated itinerary is small enough
-   that this probably means putting it directly in context, not standing
-   up a vector store for a two-page document. Worth deciding deliberately
-   rather than defaulting to whichever approach is already lying around.
+4. A follow-up chatbot that answers questions about the generated plan,
+   now planned as a knowledge graph over the `TripPlan` object rather than
+   a RAG pipeline, since the data's already structured and graph traversal
+   avoids a class of hallucination risk an LLM-generated answer wouldn't.
+   Explicitly a separate, later phase.
 5. Testing, properly. `evaluation/README.md` lays out why promptfoo and
    deepeval are scoped to different layers (agent behavior versus answer
    quality) instead of picking one and using it for both.

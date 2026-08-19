@@ -37,6 +37,27 @@ different findings run to run). Sequential is more predictable and easier
 to debug when something goes wrong, which matters more here than looking
 more autonomous.
 
+Clarification loop
+---------------------
+
+Implemented as two separate crews rather than one crew that pauses
+mid-run. ``build_intake_crew()`` runs intake by itself and checks the
+resulting ``TripPlan``'s ``open_questions``. If it's non-empty,
+``app.py`` shows those questions and waits for the next chat message,
+accumulating the whole conversation into a single growing string passed
+back in as ``{request}`` next time. Once ``open_questions`` comes back
+empty, ``app.py`` calls ``build_crew()`` and runs the real four-agent
+pipeline.
+
+This works because Streamlit already reruns the whole script on every
+new message with ``session_state`` persisting between runs, so "wait for
+the next message" doesn't need anything special from CrewAI itself, which
+has no built-in way to pause a running task for a web request/response
+cycle. The tradeoff: once the full crew runs, its own intake task runs
+again from scratch rather than reusing the already-satisfied draft, one
+redundant LLM call per plan, not a correctness problem, just not the most
+efficient shape. Worth revisiting if it turns out to matter.
+
 Food research is deferred
 ----------------------------
 
@@ -63,9 +84,6 @@ implementation later doesn't require touching anything that calls them.
 Not yet designed
 -------------------
 
-- The multi-turn clarification loop itself (asking for origin city, dates,
-  or budget when missing, then resuming with the answer). The intake agent
-  owns this conceptually; it isn't implemented.
 - Error handling for tool/API failures beyond raising
 - The PDF export step
 - The food research agent and its tool, deferred as described above

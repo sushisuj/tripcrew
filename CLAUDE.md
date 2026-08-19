@@ -71,12 +71,17 @@ assume `tripcrew/agent.py` still matches this file's own earlier
 description of it, check the current code and `docs/architecture.rst`
 directly.
 
+The clarification loop is built, as two separate crews, not one crew that
+pauses mid-run: `build_intake_crew()` checks `TripPlan.open_questions`,
+`app.py` shows them and waits for the next message if non-empty, then
+calls `build_crew()` once satisfied. Full reasoning in
+`docs/architecture.rst`'s "Clarification loop" section, including the
+known inefficiency of intake running twice.
+
 ## Not built yet (don't assume these exist)
 
-- The multi-turn clarification loop (the intake agent asking for missing
-  info and waiting for an answer). `tripcrew/app.py` is a UI skeleton only.
-- The five-agent crew itself. Currently four roles are planned for the
-  first pass, food research is deferred until its tool exists.
+- The five-agent crew itself. Currently four roles are working, food
+  research is deferred until its tool exists.
 - The food/restaurant search tool (planned: OpenTripMap, same pattern as
   `attractions.py`, different `kinds` filter).
 - Error handling for tool/API failures beyond raising an exception.

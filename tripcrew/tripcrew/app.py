@@ -26,11 +26,67 @@ st.set_page_config(page_title="tripcrew", layout="centered", initial_sidebar_sta
 
 # stHeader isn't covered by theme.secondaryBackgroundColor at all, colored
 # separately here so the chrome wraps top and side to match.
+#
+# The button/chat-input rules below are the same beveled-skeuomorphism
+# technique 98.css uses for Windows 98 buttons: two stacked inset
+# box-shadows, each split into a light corner and a dark corner, recolored
+# from Windows gray into this app's tan/cream palette. A button reads as
+# raised (light top-left, dark bottom-right, like light hitting a bump), a
+# field you type into reads as sunken (the same two colors swapped), which
+# is the old-web convention this retro pass is going for. Confirmed by
+# reading 98.css's actual source rather than guessing at the mechanism --
+# it's stacked box-shadow, not a border-color trick. stChatInput's visible
+# border lives directly on the [data-testid="stChatInput"] div itself, not
+# a separate wrapper, confirmed by inspecting the rendered DOM.
 st.markdown(
     """
     <style>
     [data-testid="stHeader"] {
         background-color: #6E8CC7;
+    }
+
+    :root {
+        --bevel-hi: #FFFFFF;
+        --bevel-hi2: #F7F6EC;
+        --bevel-sh: #9C9880;
+        --bevel-sh2: #4A4736;
+    }
+
+    .stButton > button, [data-testid="stChatInputSubmitButton"] {
+        border: none !important;
+        border-radius: 0 !important;
+        background-color: #DCD9C4 !important;
+        box-shadow:
+            inset -1px -1px var(--bevel-sh2),
+            inset 1px 1px var(--bevel-hi),
+            inset -2px -2px var(--bevel-sh),
+            inset 2px 2px var(--bevel-hi2) !important;
+    }
+    .stButton > button:active, [data-testid="stChatInputSubmitButton"]:active {
+        box-shadow:
+            inset -1px -1px var(--bevel-hi),
+            inset 1px 1px var(--bevel-sh2),
+            inset -2px -2px var(--bevel-hi2),
+            inset 2px 2px var(--bevel-sh) !important;
+    }
+
+    [data-testid="stChatInput"] {
+        border: none !important;
+        border-radius: 0 !important;
+        background-color: #FFFFFF !important;
+        box-shadow:
+            inset -1px -1px var(--bevel-hi),
+            inset 1px 1px var(--bevel-sh2),
+            inset -2px -2px var(--bevel-hi2),
+            inset 2px 2px var(--bevel-sh) !important;
+    }
+    /* The visible blue pill isn't actually on the stChatInput div itself,
+       it's painted by its direct child (Streamlit's own theme CSS, an
+       unstable auto-generated class), confirmed by walking computed
+       styles down the DOM. Strip that one layer so the white sunken
+       background set above shows through instead of sitting underneath. */
+    [data-testid="stChatInput"] > div {
+        background-color: transparent !important;
     }
     </style>
     """,

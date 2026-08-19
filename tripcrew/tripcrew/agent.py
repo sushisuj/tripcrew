@@ -14,6 +14,8 @@ documented on the code-review-crew project. A fixed, predictable pipeline
 is easier to debug when a task's output is wrong.
 """
 
+import os
+
 import crewai.llms.cache as _crewai_cache
 from crewai import LLM, Agent, Crew, Process, Task
 
@@ -26,29 +28,39 @@ from tripcrew.tools.weather import get_weather
 
 # CrewAI (as of 1.15.x) unconditionally tags every message with a
 # cache_breakpoint flag meant only for Anthropic's prompt-caching API, then
-# sends that same flag to whatever provider is actually configured. Groq's
-# API validates message schemas strictly and 400s on the unrecognized
-# field: "property 'cache_breakpoint' is unsupported". Known upstream bug,
-# github.com/crewAIInc/crewAI/issues/5886, fix PRs open but not merged as
-# of this writing. This is the workaround from that issue: replace the
-# tagging function with a no-op. Safe as long as the LLM stays on Groq (or
-# any non-Anthropic provider); if this project ever switches back to an
-# Anthropic model, remove this patch first or prompt caching silently
-# stops working for it too.
+# sends that same flag to whatever provider is actually configured. Some
+# OpenAI-compatible endpoints validate message schemas strictly and reject
+# the unrecognized field outright (confirmed on Groq: "property
+# 'cache_breakpoint' is unsupported"); others may just ignore it silently,
+# NVIDIA NIM's tolerance for it hasn't been confirmed either way. Known
+# upstream bug, github.com/crewAIInc/crewAI/issues/5886, fix PRs open but
+# not merged as of this writing. This is the workaround from that issue:
+# replace the tagging function with a no-op. Harmless to leave in place
+# regardless of provider, it just means cache_breakpoint never gets added;
+# only remove it if this project ever switches to an Anthropic model where
+# that flag is actually meant to work.
 _crewai_cache.mark_cache_breakpoint = lambda msg: msg
 
 
 def build_llm() -> LLM:
-    """Switched from NVIDIA NIM to Groq. LiteLLM has native Groq support, no
-    base_url/api_key wrangling needed, just the `groq/` provider prefix and
-    a GROQ_API_KEY in the environment (see .env.example).
+    """Switched back from Groq to NVIDIA NIM, this time on Nemotron 3 Ultra
+    (550B total params, ~55B active, MoE) instead of the small Llama model
+    the project started on. Groq's free tier kept rate-limiting mid-run
+    even after cutting the redundant intake call (see build_crew()'s
+    intake_plan parameter), 8000 tokens/minute doesn't stretch far across
+    a multi-agent pipeline.
 
-    Model is Groq's own recommended replacement for llama-3.1-8b-instant,
-    which was deprecated 08/16/26 -- the obvious small/fast Llama model
-    isn't actually the one to reach for anymore. Confirmed against Groq's
-    current model list before wiring it in, not assumed from memory.
+    The `openai/` prefix isn't optional here, same gotcha as the original
+    NVIDIA setup: it forces LiteLLM's generic OpenAI-compatible path
+    instead of matching "nvidia/..." against some other registered
+    provider and failing auth. Model ID confirmed against NVIDIA's own
+    docs (build.nvidia.com), not assumed from memory.
     """
-    return LLM(model="groq/openai/gpt-oss-20b")
+    return LLM(
+        model="openai/nvidia/nemotron-3-ultra-550b-a55b",
+        base_url=os.getenv("OPENAI_API_BASE"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+    )
 
 
 def build_intake_agent() -> Agent:

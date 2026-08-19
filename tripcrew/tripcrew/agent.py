@@ -20,7 +20,7 @@ from crewai import LLM, Agent, Crew, Process, Task
 
 from tripcrew.schemas import TripPlan
 from tripcrew.tools.attractions import get_attractions
-from tripcrew.tools.budget import estimate_budget  # noqa: F401 -- not a CrewAI tool, called directly
+from tripcrew.tools.budget import estimate_budget
 from tripcrew.tools.flights import search_flights
 from tripcrew.tools.hotels import search_hotels
 from tripcrew.tools.weather import get_weather
@@ -85,22 +85,30 @@ def build_itinerary_agent() -> Agent:
 
 
 def build_consolidation_agent() -> Agent:
-    """Merges intake and itinerary output into one TripPlan. No tools of its
-    own -- works entirely from what the earlier tasks already produced.
+    """Merges intake and itinerary output into one TripPlan.
+
+    Has exactly one tool, estimate_budget, and it's not optional: this agent
+    used to have none, which meant it wrote Budget.total_usd itself as part
+    of its own output_pydantic response, exactly the "LLM states a derived
+    number" failure the rest of this project is built to avoid. Now it has
+    to hand the gathered flight/hotel/attraction data to a real function and
+    use what comes back.
     """
     llm = build_llm()
     return Agent(
         role="Trip Consolidator",
         goal=(
             "Merge the intake and itinerary research into one coherent trip "
-            "plan, with a budget total computed from the actual numbers, "
-            "never stated from memory."
+            "plan. Call the Budget Estimator tool with the actual flight, "
+            "hotel, and attraction data to get the budget, never write a "
+            "total from memory."
         ),
         backstory=(
-            "A meticulous editor who never lets a total stand unless it's "
-            "been added up from the real flight, hotel, and attraction "
-            "costs already gathered."
+            "A meticulous editor who never lets a total stand unless it "
+            "came back from the Budget Estimator tool, fed with the real "
+            "flight, hotel, and attraction costs already gathered."
         ),
+        tools=[estimate_budget],
         llm=llm,
         verbose=True,
     )
@@ -189,13 +197,15 @@ def build_consolidation_task(agent: Agent, intake_task: Task, itinerary_task: Ta
     return Task(
         description=(
             "Merge the intake and itinerary research into one TripPlan. "
-            "Compute the budget total from the actual flight, hotel, and "
-            "attraction costs already gathered. Never state a total that "
-            "wasn't added up from those numbers."
+            "Call the Budget Estimator tool with the actual flights, hotel, "
+            "attractions, and number of nights from the earlier research, "
+            "and use exactly what it returns as the budget. Don't compute "
+            "or state a total yourself, and don't change the numbers the "
+            "tool gives back, including unpriced_categories."
         ),
         expected_output=(
-            "A complete TripPlan with a budget that sums to the actual "
-            "costs reported by the earlier research."
+            "A complete TripPlan with a budget that came from the Budget "
+            "Estimator tool, not a total you wrote yourself."
         ),
         agent=agent,
         context=[intake_task, itinerary_task],

@@ -55,6 +55,11 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   unknown, it goes in `unpriced_categories`, not folded into the total as
   zero, and the presentation task has to say so rather than show a total
   that looks complete.
+- `estimate_budget` is a real `@tool` now, and `consolidation_agent` has it
+  as its one tool. This closed the gap where the LLM used to write
+  `Budget.total_usd` itself as part of its own structured output, the exact
+  thing the bullet above warns against. Don't strip that tool back off or
+  let the consolidation task go back to computing a total from memory.
 - Flights and hotels are mocked on purpose, not by oversight. See
   `docs/architecture.rst` for why (Skyscanner/Kiwi/Booking.com require
   business-partner approval with no workable timeline; Amadeus's free tier
@@ -91,17 +96,6 @@ known inefficiency of intake running twice.
   research is deferred until its tool exists.
 - The food/restaurant search tool (planned: OpenTripMap, same pattern as
   `attractions.py`, different `kinds` filter).
-- Error handling for the real API tools is done: `get_weather` returns
-  `None`, `get_attractions` returns `[]`, `estimate_budget` flags
-  `unpriced_categories`, instead of any of them raising. What's still open:
-  the consolidation task's `output_pydantic=TripPlan` means the LLM itself
-  writes `Budget.total_usd` from context, `estimate_budget()` is imported in
-  `agent.py` but never actually called by any task. That's the same
-  "don't trust the model with a derived number" problem this file already
-  warns about, just not closed yet, wiring `estimate_budget()` in as a real
-  tool call would mean giving `consolidation_agent` a tool, which the
-  agent's current docstring and `docs/architecture.rst` both still describe
-  it as not having.
 - PDF export of the finished plan.
 - The follow-up chatbot, now planned as a knowledge graph over the
   generated `TripPlan` (graph traversal, not an LLM call, not a RAG

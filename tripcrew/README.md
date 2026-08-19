@@ -20,9 +20,8 @@ not the five originally sketched, food research is deferred until its tool
 exists (see `docs/architecture.rst`): an intake agent that asks for
 whatever's missing (origin city, dates, budget) before anything else runs,
 an itinerary agent that pulls real attractions and weather, a consolidator
-that builds the final plan (the budget total is meant to be computed from
-the actual numbers rather than stated by the LLM, not fully true yet, see
-`docs/architecture.rst`), and a presenter that writes it up. `tripcrew/app.py` is a working
+that builds the final plan and calls a real tool to compute the budget
+total instead of stating one itself, and a presenter that writes it up. `tripcrew/app.py` is a working
 Streamlit chat, not a skeleton, it runs a cheap intake-only check first and
 only kicks off the full crew once it has enough to work with.
 
@@ -37,13 +36,12 @@ forward looks like.
 
 The plan, in rough order:
 
-1. Basic error handling for tool and API failures, mostly done. A missing
-   weather result or a failed attraction lookup now degrades to "not
-   available" instead of raising, and the budget honestly flags any
-   category it couldn't price instead of quietly counting it as free. Still
-   open: the final budget total is written by the consolidation agent's own
-   output right now, not computed in code the way it's meant to be, see
-   `docs/architecture.rst`.
+1. Basic error handling for tool and API failures, done. A missing weather
+   result or a failed attraction lookup degrades to "not available" instead
+   of raising, the budget flags any category it couldn't price instead of
+   quietly counting it as free, and the consolidation agent now calls a
+   real tool to compute the total instead of writing one itself. Full
+   reasoning in `docs/architecture.rst`.
 2. The food research agent and its tool, once it's worth the second
    OpenTripMap integration.
 3. Exporting the finished itinerary to PDF.

@@ -23,10 +23,10 @@ hotels, since nothing else can usefully run until logistics are settled.
 An itinerary research agent that owns attractions and weather, since
 weather should influence how attractions get sequenced across days. A food
 research agent, covered below. A consolidation agent that merges
-everything into ``TripPlan``, the intent is for this to be where
-``Budget.recompute()`` gets called instead of trusting any agent's stated
-total, not yet true in the current code, see "Error handling for tool
-failures" below. A presentation agent that formats the finished plan for
+everything into ``TripPlan``, and calls the Budget Estimator tool
+(``estimate_budget()``) to get ``Budget.total_usd`` rather than stating one
+itself, see "Error handling for tool failures" below for how that came to
+be its one tool. A presentation agent that formats the finished plan for
 the user.
 
 Sequential over hierarchical on purpose: CrewAI also offers
@@ -116,16 +116,25 @@ than present it as complete.
 Flights and hotels don't need any of this, they're mocked, pure in-memory
 generation with no I/O to fail.
 
-What's still open: the consolidation task itself. It has
-``output_pydantic=TripPlan`` and ``consolidation_agent`` has no tools, so
-``Budget.total_usd`` in the final plan is currently written by the LLM from
-context, not computed by calling ``estimate_budget()`` in code.
-``estimate_budget()`` is imported into ``agent.py`` but nothing calls it.
-That's the exact "don't trust the model with a derived number" problem this
-project is built around, just not closed yet for the one number that
-actually reaches the user. Fixing it means giving ``consolidation_agent`` a
-tool, a real change to a design this page currently describes as tool-free,
-worth its own pass rather than folding in here.
+The consolidation task used to have the same problem in a quieter form:
+``output_pydantic=TripPlan`` and no tools meant ``Budget.total_usd`` in the
+final plan was written by the LLM from context, not computed at all,
+despite ``estimate_budget()`` already existing and being imported into
+``agent.py``. Nothing ever called it. That's now fixed: ``estimate_budget``
+is a real ``@tool``, ``consolidation_agent`` has it as its one tool, and
+the consolidation task's description tells it to call the tool with the
+gathered flight, hotel, and attraction data and use exactly what comes
+back, not to compute or restate a total itself.
+
+One thing worth knowing if this tool gets touched again: CrewAI's tool
+layer hands the underlying function whatever the LLM's tool call JSON
+deserializes to, plain dicts, not ``Flight``/``Hotel``/``Attraction``
+instances, even though the ``args_schema`` built from the function's type
+hints describes that nested shape. Confirmed by calling
+``estimate_budget.run()`` directly and hitting an ``AttributeError`` on a
+dict. ``estimate_budget()`` now coerces its inputs with
+``Model.model_validate(...)`` at the top instead of assuming the type hints
+are enforced automatically.
 
 Not yet designed
 -------------------

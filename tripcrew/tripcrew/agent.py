@@ -166,15 +166,16 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
             "Using the destination and dates from the intake research, find "
             "attractions worth visiting and check the weather forecast. Use "
             "the forecast to note which days suit outdoor attractions and "
-            "which don't. The weather tool returns nothing when a forecast "
-            "isn't actually available -- treat that as 'weather unavailable "
-            "for this trip,' don't invent a plausible-sounding forecast to "
-            "fill the gap."
+            "which don't. Both tools return an empty result rather than an "
+            "error when they can't actually look something up -- treat an "
+            "empty result as 'not available for this trip,' don't invent a "
+            "plausible-sounding attraction or forecast to fill the gap."
         ),
         expected_output=(
             "A list of attractions with the weather context that informed "
             "how they'd be sequenced across the trip's days, or a plain note "
-            "that weather wasn't available if the tool came back empty."
+            "that attractions and/or weather weren't available if the tools "
+            "came back empty."
         ),
         agent=agent,
         context=[intake_task],

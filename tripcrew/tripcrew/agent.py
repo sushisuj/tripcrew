@@ -202,6 +202,37 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
     )
 
 
+def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
+    """Same job as build_itinerary_task, for the case where intake already
+    ran separately (build_intake_crew(), see app.py's two-phase flow) and
+    its result is already known. Destination and days are baked directly
+    into the description as plain values instead of coming through Task
+    context chaining, since there's no intake_task in this crew to chain
+    from -- this is what lets build_crew() skip rerunning intake from
+    scratch, see its own docstring.
+    """
+    return Task(
+        description=(
+            f"The intake research already determined the destination is "
+            f"{intake_plan.destination!r} and the trip is {intake_plan.days} "
+            "days. Using this destination and timeframe, find attractions "
+            "worth visiting and check the weather forecast. Use the "
+            "forecast to note which days suit outdoor attractions and which "
+            "don't. Both tools return an empty result rather than an error "
+            "when they can't actually look something up -- treat an empty "
+            "result as 'not available for this trip,' don't invent a "
+            "plausible-sounding attraction or forecast to fill the gap."
+        ),
+        expected_output=(
+            "A list of attractions with the weather context that informed "
+            "how they'd be sequenced across the trip's days, or a plain note "
+            "that attractions and/or weather weren't available if the tools "
+            "came back empty."
+        ),
+        agent=agent,
+    )
+
+
 def build_consolidation_task(agent: Agent, intake_task: Task, itinerary_task: Task) -> Task:
     """Depends on both prior tasks. Only task with a pydantic output type --
     this is the point where a TripPlan actually exists as structured data.
@@ -221,6 +252,40 @@ def build_consolidation_task(agent: Agent, intake_task: Task, itinerary_task: Ta
         ),
         agent=agent,
         context=[intake_task, itinerary_task],
+        output_pydantic=TripPlan,
+    )
+
+
+def build_consolidation_task_from_plan(agent: Agent, intake_plan: TripPlan, itinerary_task: Task) -> Task:
+    """Same job as build_consolidation_task, paired with
+    build_itinerary_task_from_plan. Needs the intake plan's flights and
+    hotel data verbatim to call the Budget Estimator tool correctly, so
+    the whole plan gets embedded as JSON rather than just destination/days
+    -- unlike the itinerary task, this one can't get away with a short
+    summary. interpolate_only (CrewAI's template-filling step, runs on
+    every task description during kickoff) only substitutes bare
+    {identifier} placeholders, confirmed by reading its source, so the
+    embedded JSON's own braces don't collide with it.
+    """
+    intake_json = intake_plan.model_dump_json(indent=2)
+    return Task(
+        description=(
+            "The intake research already gathered this data, use it "
+            f"exactly as given, don't re-derive or restate it differently:\n\n{intake_json}\n\n"
+            "Merge this with the itinerary research into one TripPlan. "
+            "Call the Budget Estimator tool with the actual flights, hotel, "
+            "attractions, and number of nights from the data above and the "
+            "itinerary research, and use exactly what it returns as the "
+            "budget. Don't compute or state a total yourself, and don't "
+            "change the numbers the tool gives back, including "
+            "unpriced_categories."
+        ),
+        expected_output=(
+            "A complete TripPlan with a budget that came from the Budget "
+            "Estimator tool, not a total you wrote yourself."
+        ),
+        agent=agent,
+        context=[itinerary_task],
         output_pydantic=TripPlan,
     )
 
@@ -245,17 +310,44 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
     )
 
 
-def build_crew() -> Crew:
-    """Assembles all four agents and their chained tasks into a
-    Process.sequential Crew. This is what app.py should call, not the
-    individual builder functions above -- those exist mainly so this
-    function and tests can construct pieces independently.
+def build_crew(intake_plan: TripPlan | None = None) -> Crew:
+    """Assembles the chained tasks into a Process.sequential Crew. This is
+    what app.py should call, not the individual builder functions above --
+    those exist mainly so this function and tests can construct pieces
+    independently.
+
+    intake_plan is the already-satisfied draft from build_intake_crew()
+    (see app.py's two-phase flow: it runs intake alone first, checks
+    open_questions, and only calls this function once that draft is
+    complete). When it's given, this crew skips intake_task entirely and
+    starts from itinerary research, with the known destination/days/
+    flights/hotel baked into the remaining tasks' descriptions instead of
+    coming from a freshly-run intake_task's context. That used to be a
+    "known simplification" (rerunning intake from scratch, one redundant
+    LLM call every message) -- redundant LLM calls are exactly what burns
+    through Groq's free-tier rate limit fastest, so it stopped being a
+    minor inefficiency and became a real reason a plan could fail outright.
+
+    Passing no intake_plan keeps the original four-task chain, for tests
+    or any caller that doesn't already have a satisfied draft on hand.
     """
-    intake_agent = build_intake_agent()
     itinerary_agent = build_itinerary_agent()
     consolidation_agent = build_consolidation_agent()
     presentation_agent = build_presentation_agent()
 
+    if intake_plan is not None:
+        itinerary_task = build_itinerary_task_from_plan(itinerary_agent, intake_plan)
+        consolidation_task = build_consolidation_task_from_plan(consolidation_agent, intake_plan, itinerary_task)
+        presentation_task = build_presentation_task(presentation_agent, consolidation_task)
+        return Crew(
+            agents=[itinerary_agent, consolidation_agent, presentation_agent],
+            tasks=[itinerary_task, consolidation_task, presentation_task],
+            process=Process.sequential,
+            tracing=False,
+            verbose=True,
+        )
+
+    intake_agent = build_intake_agent()
     intake_task = build_intake_task(intake_agent)
     itinerary_task = build_itinerary_task(itinerary_agent, intake_task)
     consolidation_task = build_consolidation_task(consolidation_agent, intake_task, itinerary_task)
@@ -275,11 +367,9 @@ def build_intake_crew() -> Crew:
     loop in app.py. Checking open_questions here is cheaper than running
     the full four-agent pipeline just to find out something's missing.
 
-    Known simplification: once app.py decides to move on, it calls
-    build_crew() next, which runs its own fresh intake task from scratch
-    rather than reusing this one's already-satisfied result. That's one
-    redundant LLM call, not a correctness problem, just not optimally
-    efficient. Worth fixing later if it matters, not blocking for now.
+    app.py passes this crew's result straight into build_crew(intake_plan=...)
+    once open_questions comes back empty, so intake only ever runs once per
+    message, not twice like it used to.
     """
     intake_agent = build_intake_agent()
     intake_task = build_intake_task(intake_agent)

@@ -4,12 +4,10 @@ Two-phase flow. Each message runs build_intake_crew() first and checks the
 resulting TripPlan's open_questions. If anything's still missing, the
 questions are shown and the app waits for the next message, accumulating
 the whole conversation as context for the next intake attempt. Once
-open_questions comes back empty, it runs the full build_crew() pipeline
-once for real and shows the presenter agent's write-up.
-
-Known simplification, see agent.py's build_intake_crew() docstring: the
-full crew's own intake task reruns from scratch rather than reusing the
-already-satisfied draft. One redundant LLM call, not a correctness issue.
+open_questions comes back empty, it runs build_crew(intake_plan=draft_plan)
+once for real and shows the presenter agent's write-up -- passing the
+already-satisfied draft straight in so the full crew doesn't rerun intake
+from scratch, see agent.py's build_crew() docstring.
 
 The sidebar shows the same draft TripPlan that already decides whether to
 ask a clarifying question, nothing new is computed for it. It's a status
@@ -188,7 +186,9 @@ if prompt:
             st.write(response)
         else:
             with st.spinner("Planning the full trip..."):
-                result = build_crew().kickoff(inputs={"request": st.session_state.conversation})
+                result = build_crew(intake_plan=draft_plan).kickoff(
+                    inputs={"request": st.session_state.conversation}
+                )
             response = str(result)
             st.write(response)
 

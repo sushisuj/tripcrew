@@ -6,15 +6,16 @@ clarification loop; itinerary research owns attractions and weather;
 consolidation merges everything into a TripPlan with a computed budget;
 presentation formats the result for the user.
 
-This file only defines the agents themselves, one builder function per
-role. Task chaining and the Process.sequential crew assembly aren't wired
-up yet -- that's the next piece.
+This file defines the agents and their chained tasks, one builder function
+each, context passed from each task to the next. The Process.sequential
+Crew assembly itself isn't wired up yet -- that's the next piece.
 """
 
 import os
 
-from crewai import LLM, Agent
+from crewai import LLM, Agent, Task
 
+from tripcrew.schemas import TripPlan
 from tripcrew.tools.attractions import get_attractions
 from tripcrew.tools.budget import estimate_budget  # noqa: F401 -- not a CrewAI tool, called directly
 from tripcrew.tools.flights import search_flights
@@ -116,4 +117,79 @@ def build_presentation_agent() -> Agent:
         ),
         llm=llm,
         verbose=True,
+    )
+
+
+def build_intake_task(agent: Agent) -> Task:
+    """Runs first, no context from anything -- it's the start of the chain."""
+    return Task(
+        description=(
+            "Given the traveler's request, determine the origin city, travel "
+            "dates, and budget if given. If any of these are missing, state "
+            "clearly what's missing instead of guessing. Once you have enough "
+            "to proceed, search for flights and a hotel using your tools and "
+            "report exactly what they returned."
+        ),
+        expected_output=(
+            "The origin city, dates, and budget (or a clear statement of "
+            "what's missing), plus the flight and hotel options your tools "
+            "actually returned."
+        ),
+        agent=agent,
+    )
+
+
+def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
+    """Depends on intake_task's output for destination and dates."""
+    return Task(
+        description=(
+            "Using the destination and dates from the intake research, find "
+            "attractions worth visiting and check the weather forecast. Use "
+            "the forecast to note which days suit outdoor attractions and "
+            "which don't."
+        ),
+        expected_output=(
+            "A list of attractions with the weather context that informed "
+            "how they'd be sequenced across the trip's days."
+        ),
+        agent=agent,
+        context=[intake_task],
+    )
+
+
+def build_consolidation_task(agent: Agent, intake_task: Task, itinerary_task: Task) -> Task:
+    """Depends on both prior tasks. Only task with a pydantic output type --
+    this is the point where a TripPlan actually exists as structured data.
+    """
+    return Task(
+        description=(
+            "Merge the intake and itinerary research into one TripPlan. "
+            "Compute the budget total from the actual flight, hotel, and "
+            "attraction costs already gathered. Never state a total that "
+            "wasn't added up from those numbers."
+        ),
+        expected_output=(
+            "A complete TripPlan with a budget that sums to the actual "
+            "costs reported by the earlier research."
+        ),
+        agent=agent,
+        context=[intake_task, itinerary_task],
+        output_pydantic=TripPlan,
+    )
+
+
+def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
+    """Depends on the consolidated TripPlan. Last task in the chain."""
+    return Task(
+        description=(
+            "Turn the consolidated TripPlan into a clear, practical "
+            "write-up for the traveler. Present exactly what's in the "
+            "plan, don't add details the plan doesn't contain."
+        ),
+        expected_output=(
+            "A readable trip plan write-up covering flights, hotel, "
+            "attractions, weather, and budget."
+        ),
+        agent=agent,
+        context=[consolidation_task],
     )

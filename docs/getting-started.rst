@@ -17,7 +17,7 @@ shape) with your own API keys:
 
    GROQ_API_KEY=<groq-key>
    OPENWEATHER_API_KEY=<openweathermap-key>
-   OPENTRIPMAP_API_KEY=<opentripmap-key>
+   GEOAPIFY_API_KEY=<geoapify-key>
 
 Running the app
 ----------------

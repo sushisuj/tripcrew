@@ -30,7 +30,7 @@ st.markdown(
     """
     <style>
     [data-testid="stHeader"] {
-        background-color: #8FA8D9;
+        background-color: #6E8CC7;
     }
     </style>
     """,

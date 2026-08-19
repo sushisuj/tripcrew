@@ -124,14 +124,21 @@ def build_presentation_agent() -> Agent:
 
 
 def build_intake_task(agent: Agent) -> Task:
-    """Runs first, no context from anything -- it's the start of the chain."""
+    """Runs first, no context from anything -- it's the start of the chain.
+
+    {request} is filled in from Crew.kickoff(inputs={"request": ...}) --
+    this is the only place the traveler's actual message enters the crew.
+    Missing this was a real bug: without it, nothing downstream ever knows
+    what was actually asked.
+    """
     return Task(
         description=(
-            "Given the traveler's request, determine the origin city, travel "
-            "dates, and budget if given. If any of these are missing, state "
-            "clearly what's missing instead of guessing. Once you have enough "
-            "to proceed, search for flights and a hotel using your tools and "
-            "report exactly what they returned."
+            "The traveler asked: {request}\n\n"
+            "Determine the origin city, travel dates, and budget if given. "
+            "If any of these are missing, state clearly what's missing "
+            "instead of guessing. Once you have enough to proceed, search "
+            "for flights and a hotel using your tools and report exactly "
+            "what they returned."
         ),
         expected_output=(
             "The origin city, dates, and budget (or a clear statement of "

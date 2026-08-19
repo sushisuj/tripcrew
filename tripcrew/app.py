@@ -1,17 +1,17 @@
 """Streamlit chat entry point.
 
-Skeleton only for now -- structurally based on chat_app.py from the
-code-review-crew project, but that one fires a single crew.kickoff() per
-message with no memory of what came before. This needs an actual multi-turn
-loop so the agent can ask "what dates?" and use the answer on the next
-message, which chat_app.py's pattern doesn't support as written. Not built
-yet -- flagged here instead of silently copy-pasted and left broken.
+Calls the four-agent sequential crew from tripcrew.agent for each message.
+Still no multi-turn clarification loop -- if the intake agent says
+something's missing, the user has to ask again in a new message with that
+info, there's no pause-and-resume mid-crew yet. That's a separate, harder
+piece, not pretended to be solved here just because the crew now actually
+runs.
 """
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from tripcrew.agent import build_planner_agent
+from tripcrew.agent import build_crew
 
 load_dotenv()
 st.set_page_config(page_title="tripcrew", layout="centered")
@@ -34,12 +34,10 @@ if prompt:
         st.write(prompt)
 
     with st.chat_message("assistant"):
-        st.warning(
-            "Planning loop not wired up yet -- this is a skeleton. "
-            "build_planner_agent() exists but nothing calls it end-to-end "
-            "with the clarification flow yet."
-        )
+        with st.spinner("Planning..."):
+            crew = build_crew()
+            result = crew.kickoff(inputs={"request": prompt})
+        response = str(result)
+        st.write(response)
 
-    st.session_state.messages.append(
-        {"role": "assistant", "content": "(planning loop not implemented yet)"}
-    )
+    st.session_state.messages.append({"role": "assistant", "content": response})

@@ -88,6 +88,17 @@ st.markdown(
     [data-testid="stChatInput"] > div {
         background-color: transparent !important;
     }
+
+    /* Denser sidebar type, an old portal nav packed a lot into a narrow
+       column instead of Streamlit's default generous spacing. Scoped to
+       the sidebar only, the chat itself keeps its normal readable size. */
+    [data-testid="stSidebar"] p, [data-testid="stSidebar"] li {
+        font-size: 13px;
+        line-height: 1.3;
+        margin-bottom: 0.25rem;
+    }
+    .heading-purple { color: #6B4A9E; font-weight: bold; font-size: 14px; }
+    .heading-orange { color: #B35900; font-weight: bold; font-size: 14px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -121,7 +132,7 @@ def render_sidebar() -> None:
     plan = st.session_state.trip_plan
 
     st.sidebar.title("tripcrew")
-    st.sidebar.markdown("**Trip so far**")
+    st.sidebar.markdown('<div class="heading-purple">Trip so far</div>', unsafe_allow_html=True)
 
     if plan is None:
         st.sidebar.write("Nothing yet, say where you want to go.")
@@ -134,7 +145,7 @@ def render_sidebar() -> None:
         st.sidebar.write(f"Dates: {dates}")
 
         if plan.open_questions:
-            st.sidebar.markdown("**Still need**")
+            st.sidebar.markdown('<div class="heading-orange">Still need</div>', unsafe_allow_html=True)
             for question in plan.open_questions:
                 st.sidebar.write(f"- {question}")
 

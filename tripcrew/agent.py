@@ -130,22 +130,32 @@ def build_intake_task(agent: Agent) -> Task:
     this is the only place the traveler's actual message enters the crew.
     Missing this was a real bug: without it, nothing downstream ever knows
     what was actually asked.
+
+    Outputs a TripPlan, the same model consolidation_task produces later,
+    but this one is a draft: attractions and weather stay empty here,
+    open_questions is the whole point. That field was designed from the
+    start for exactly this ("anything the agent needed but didn't have"),
+    not a new model bolted on for the clarification loop. app.py checks
+    open_questions before deciding whether to run the rest of the crew or
+    ask the traveler something first.
     """
     return Task(
         description=(
             "The traveler asked: {request}\n\n"
-            "Determine the origin city, travel dates, and budget if given. "
-            "If any of these are missing, state clearly what's missing "
-            "instead of guessing. Once you have enough to proceed, search "
-            "for flights and a hotel using your tools and report exactly "
-            "what they returned."
+            "Determine the destination, trip length in days, origin city, "
+            "travel dates, and budget if given. If origin city, dates, or "
+            "budget are missing, list each one in open_questions instead of "
+            "guessing -- don't search for flights or a hotel until you have "
+            "enough to do it for real. Once you do, search using your tools "
+            "and report exactly what they returned."
         ),
         expected_output=(
-            "The origin city, dates, and budget (or a clear statement of "
-            "what's missing), plus the flight and hotel options your tools "
-            "actually returned."
+            "A TripPlan with destination and days filled in, flights and "
+            "hotel filled in if you had enough to search for them, and "
+            "open_questions listing anything essential still missing."
         ),
         agent=agent,
+        output_pydantic=TripPlan,
     )
 
 
@@ -224,6 +234,28 @@ def build_crew() -> Crew:
     return Crew(
         agents=[intake_agent, itinerary_agent, consolidation_agent, presentation_agent],
         tasks=[intake_task, itinerary_task, consolidation_task, presentation_task],
+        process=Process.sequential,
+        tracing=False,
+        verbose=True,
+    )
+
+
+def build_intake_crew() -> Crew:
+    """A one-task crew running intake alone, for the clarification-gathering
+    loop in app.py. Checking open_questions here is cheaper than running
+    the full four-agent pipeline just to find out something's missing.
+
+    Known simplification: once app.py decides to move on, it calls
+    build_crew() next, which runs its own fresh intake task from scratch
+    rather than reusing this one's already-satisfied result. That's one
+    redundant LLM call, not a correctness problem, just not optimally
+    efficient. Worth fixing later if it matters, not blocking for now.
+    """
+    intake_agent = build_intake_agent()
+    intake_task = build_intake_task(intake_agent)
+    return Crew(
+        agents=[intake_agent],
+        tasks=[intake_task],
         process=Process.sequential,
         tracing=False,
         verbose=True,

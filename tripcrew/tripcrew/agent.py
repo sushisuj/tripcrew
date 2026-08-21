@@ -15,6 +15,7 @@ is easier to debug when a task's output is wrong.
 """
 
 import os
+from datetime import date, timedelta
 
 import crewai.llms.cache as _crewai_cache
 from crewai import LLM, Agent, Crew, Process, Task
@@ -214,6 +215,41 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
     )
 
 
+def _trip_date_range(intake_plan: TripPlan) -> str:
+    """Best-effort human-readable date range for the trip, derived from
+    whatever real date intake actually gathered: the first flight's
+    departure_date, falling back to the hotel's check_in if there's no
+    flight yet. Returns a plain sentence instead of raising if neither is
+    present, so build_itinerary_task_from_plan always has *something*
+    concrete to hand the agent instead of silently omitting dates -- that
+    omission was the actual bug (see that function's docstring): with no
+    real date in the description, the itinerary/weather agent was free to
+    invent one, which is how a Lisbon trip in November came back with
+    weather dated the following January.
+    """
+    start_str = None
+    if intake_plan.flights and intake_plan.flights[0].departure_date:
+        start_str = intake_plan.flights[0].departure_date
+    elif intake_plan.hotel and intake_plan.hotel.check_in:
+        start_str = intake_plan.hotel.check_in
+
+    if not start_str:
+        return (
+            "No confirmed travel dates are available yet -- don't invent "
+            "any, note that weather isn't available instead."
+        )
+
+    try:
+        start = date.fromisoformat(start_str)
+        end = start + timedelta(days=max(intake_plan.days - 1, 0))
+        return f"The trip runs from {start.isoformat()} to {end.isoformat()}."
+    except ValueError:
+        # Source data wasn't a clean ISO date -- pass it through verbatim
+        # rather than crashing the task-building step over a formatting
+        # quirk, still far better than supplying no date at all.
+        return f"The trip starts on {start_str!r}, use that date as given."
+
+
 def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     """Same job as build_itinerary_task, for the case where intake already
     ran separately (build_intake_crew(), see app.py's two-phase flow) and
@@ -222,17 +258,28 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     context chaining, since there's no intake_task in this crew to chain
     from -- this is what lets build_crew() skip rerunning intake from
     scratch, see its own docstring.
+
+    Also bakes in the real trip date range via _trip_date_range(). This
+    used to bake in only destination and days, nothing about dates -- the
+    itinerary/weather agent had no real date to anchor to and made one up,
+    which is why get_weather() was getting called with hallucinated dates
+    months off from the actual trip. Fixed here rather than in
+    get_weather() itself, since the tool has no way to know what date it
+    *should* have been called with, only what it was given.
     """
+    date_range = _trip_date_range(intake_plan)
     return Task(
         description=(
             f"The intake research already determined the destination is "
             f"{intake_plan.destination!r} and the trip is {intake_plan.days} "
-            "days. Using this destination and timeframe, find attractions "
-            "worth visiting and check the weather forecast. Use the "
-            "forecast to note which days suit outdoor attractions and which "
-            "don't. Both tools return an empty result rather than an error "
-            "when they can't actually look something up -- treat an empty "
-            "result as 'not available for this trip,' don't invent a "
+            f"days. {date_range} Using this destination and these exact "
+            "dates, find attractions worth visiting and check the weather "
+            "forecast for the actual trip dates above -- don't check or "
+            "report weather for any other date. Use the forecast to note "
+            "which days suit outdoor attractions and which don't. Both "
+            "tools return an empty result rather than an error when they "
+            "can't actually look something up -- treat an empty result as "
+            "'not available for this trip,' don't invent a "
             "plausible-sounding attraction or forecast to fill the gap."
         ),
         expected_output=(

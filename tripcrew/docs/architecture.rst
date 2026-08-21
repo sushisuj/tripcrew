@@ -65,7 +65,7 @@ Food research is deferred
 
 The food/restaurant research agent is part of the design but not wired
 into the crew yet. It depends on a food-search tool that hasn't been
-built. The plan is to reuse OpenTripMap's ``kinds`` filter, same API key
+built. The plan is to reuse Geoapify's ``categories`` filter, same API key
 and same pattern as ``tripcrew/tools/attractions.py``, just filtered to
 restaurants and cafes instead of landmarks, so it's a small addition when
 it happens, not a new integration. Until then the crew runs with four
@@ -107,7 +107,7 @@ task's description was updated to say plainly that an empty result means
 ``estimate_budget()`` had a quieter version of the same problem: a missing
 price (``price_usd`` or ``estimated_cost_usd`` being ``None``) was treated
 as ``price or 0``, silently counting "we don't know" as "free." Attractions
-hit this on every run, OpenTripMap never returns cost data, so
+hit this on every run, Geoapify never returns cost data, so
 ``attractions_usd`` was always 0 with nothing flagging it. ``Budget`` now
 has ``unpriced_categories``, populated by ``estimate_budget()``, and the
 presentation task is told to say the total excludes those categories rather

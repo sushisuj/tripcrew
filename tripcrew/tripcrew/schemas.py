@@ -55,7 +55,7 @@ class Budget(BaseModel):
     unpriced_categories: list[str] = Field(
         default_factory=list,
         description="Categories left out of total_usd because no price data was "
-        "available for them (e.g. OpenTripMap never returns attraction costs). "
+        "available for them (e.g. Geoapify never returns attraction costs). "
         "Exists so a total that excludes something is never presented as if it "
         "were complete -- same honesty rule as the source field on Flight and "
         "Hotel, applied to what got silently treated as free instead of unknown.",

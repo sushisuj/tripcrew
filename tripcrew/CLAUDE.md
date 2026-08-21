@@ -51,7 +51,7 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
 - A missing price is not a free item. `Budget.unpriced_categories` exists
   because `estimate_budget()` used to do `price or 0`, which silently turned
   "we don't know the cost" into "$0" (attractions hit this every time,
-  OpenTripMap never returns cost data). If a category's cost is genuinely
+  Geoapify never returns cost data). If a category's cost is genuinely
   unknown, it goes in `unpriced_categories`, not folded into the total as
   zero, and the presentation task has to say so rather than show a total
   that looks complete.
@@ -94,8 +94,8 @@ known inefficiency of intake running twice.
 
 - The five-agent crew itself. Currently four roles are working, food
   research is deferred until its tool exists.
-- The food/restaurant search tool (planned: OpenTripMap, same pattern as
-  `attractions.py`, different `kinds` filter).
+- The food/restaurant search tool (planned: Geoapify, same pattern as
+  `attractions.py`, different `categories` filter).
 - PDF export of the finished plan.
 - The follow-up chatbot, now planned as a knowledge graph over the
   generated `TripPlan` (graph traversal, not an LLM call, not a RAG

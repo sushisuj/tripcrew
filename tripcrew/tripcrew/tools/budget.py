@@ -38,7 +38,7 @@ def estimate_budget(
     silently understates the total instead of raising or refusing -- the
     same failure mode as trusting an LLM's stated total, just moved into the
     arithmetic instead. estimated_cost_usd on Attraction is None every time
-    right now, since OpenTripMap doesn't return cost data (see
+    right now, since Geoapify doesn't return cost data (see
     attractions.py), which meant attractions_usd was always 0 and nothing
     ever said so. unpriced_categories exists so that's visible instead of
     silent.

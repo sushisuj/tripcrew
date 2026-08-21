@@ -25,7 +25,7 @@ total instead of stating one itself, and a presenter that writes it up. `tripcre
 Streamlit chat, not a skeleton, it runs a cheap intake-only check first and
 only kicks off the full crew once it has enough to work with.
 
-Weather and attractions call real APIs (OpenWeatherMap, OpenTripMap).
+Weather and attractions call real APIs (OpenWeatherMap, Geoapify).
 Flights and hotels are mocked on purpose, not by oversight, because the
 APIs with real live pricing gate access behind a business-partner approval
 process that doesn't clear on a reasonable timeline. See
@@ -43,7 +43,7 @@ The plan, in rough order:
    real tool to compute the total instead of writing one itself. Full
    reasoning in `docs/architecture.rst`.
 2. The food research agent and its tool, once it's worth the second
-   OpenTripMap integration.
+   Geoapify integration.
 3. Exporting the finished itinerary to PDF.
 4. A follow-up chatbot that answers questions about the generated plan,
    now planned as a knowledge graph over the `TripPlan` object rather than

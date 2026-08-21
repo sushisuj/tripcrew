@@ -81,6 +81,14 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   on Paragraph text only, escaping a Table cell produces a literal
   `-&gt;` on the page. Confirmed by rendering a sample and reading it back,
   not just eyeballing the build succeeding.
+- `tripcrew/followup.py` is the same "not an agent tool" case as
+  `pdf_export.py`, plus one more rule specific to it: the LLM call in there
+  (`build_intent_task`, `output_pydantic=TripQuestionIntent`) is only ever
+  allowed to pick which field of `TripPlan` a question is about. It must
+  never gain a code path that lets it draft the actual answer text --
+  that's the one thing that would turn this from "graph traversal" back
+  into the RAG pipeline the design explicitly avoids. `format_answer()`
+  (plain Python) is the only thing allowed to produce the text a user sees.
 
 ## Architecture note: multi-agent, not single-agent
 
@@ -96,9 +104,9 @@ directly.
 The clarification loop is built, as two separate crews, not one crew that
 pauses mid-run: `build_intake_crew()` checks `TripPlan.open_questions`,
 `app.py` shows them and waits for the next message if non-empty, then
-calls `build_crew()` once satisfied. Full reasoning in
-`docs/architecture.rst`'s "Clarification loop" section, including the
-known inefficiency of intake running twice.
+calls `build_crew(intake_plan=...)` once satisfied, passing that draft
+straight in so the full crew doesn't rerun intake from scratch. Full
+reasoning in `docs/architecture.rst`'s "Clarification loop" section.
 
 ## Not built yet (don't assume these exist)
 
@@ -106,10 +114,5 @@ known inefficiency of intake running twice.
   research is deferred until its tool exists.
 - The food/restaurant search tool (planned: Geoapify, same pattern as
   `attractions.py`, different `categories` filter).
-- The follow-up chatbot, now planned as a knowledge graph over the
-  generated `TripPlan` (graph traversal, not an LLM call, not a RAG
-  pipeline), explicitly a separate later phase. See
-  `docs/architecture.rst` for why this is a better fit than reusing
-  Constellate's RAG stack.
 - promptfoo and deepeval test suites (see `evaluation/README.md` for the
   intended split between them).

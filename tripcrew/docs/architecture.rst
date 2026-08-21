@@ -164,15 +164,39 @@ unescaped ``<`` or ``&`` reaching a ``Paragraph`` *would* raise, which is
 what made the bug easy to miss at first: escaping felt like the safe
 default everywhere.
 
+Follow-up chatbot
+--------------------
+
+``tripcrew/followup.py`` answers questions about a finished plan once
+``app.py`` detects one exists (``st.session_state.trip_write_up`` set).
+The next chat message stops feeding ``build_intake_crew()`` entirely and
+goes to ``answer_trip_question()`` instead -- "Start over" in the sidebar
+is the explicit, only way back to planning a different trip.
+
+This ended up simpler than the originally sketched knowledge-graph design
+above once it came time to actually build it. ``TripPlan`` already has a
+small, fixed set of top-level fields (flights, hotel, attractions,
+weather, budget), so a real graph with nodes and edges would have been
+structure for its own sake, five key lookups don't need traversal
+machinery. What's kept from the original idea is the reasoning behind it:
+one LLM call classifies which of those five fields a question is about
+(``output_pydantic=TripQuestionIntent``, same pattern as every other
+structured call in this project), and plain Python answers by reading that
+field directly off ``TripPlan``. The LLM's output can never contain a
+fact, only a pointer to where a fact already is, that's what actually
+avoids the RAG-style hallucination risk (an answer stating a detail that
+sounds plausible but isn't in the plan), not the presence or absence of a
+graph data structure specifically.
+
+The one place classification still touches a real value directly: a
+weather question about a specific day ("day 2", "the first day") needs a
+resolved date to look up. The intent task's description lists the trip's
+actual forecast dates and tells the model to pick one of those exactly, or
+leave the field empty rather than guess, same "treat missing as missing,
+don't invent" rule ``get_weather()`` and ``get_attractions()`` already
+follow.
+
 Not yet designed
 -------------------
 
 - The food research agent and its tool, deferred as described above
-- The follow-up chatbot, now planned as a knowledge graph over the
-  generated ``TripPlan`` rather than a RAG pipeline. ``TripPlan`` is
-  already structured pydantic output, so building a graph from it is data
-  transformation, not the slow LLM entity extraction that killed the
-  original knowledge-graph project on Constellate. Answering by graph
-  traversal instead of LLM generation also removes a class of hallucination
-  risk that a RAG answer wouldn't. Explicitly a separate, later phase, not
-  part of the planner itself.

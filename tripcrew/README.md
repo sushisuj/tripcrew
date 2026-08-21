@@ -36,6 +36,12 @@ Once a trip is fully planned, the sidebar offers it as a downloadable PDF
 (`tripcrew/pdf_export.py`), built from the same consolidated `TripPlan`
 the budget came from, not a re-formatted copy of the chat text.
 
+The chat also switches modes once a trip's done: the next message stops
+feeding the planning loop and becomes a follow-up question instead
+(`tripcrew/followup.py`), answered by looking up real fields on that same
+`TripPlan`, not by an LLM generating an answer from scratch. "Start over"
+in the sidebar is the explicit way back to planning a different trip.
+
 ## Where this is headed
 
 The plan, in rough order:
@@ -50,10 +56,11 @@ The plan, in rough order:
    Geoapify integration.
 3. PDF export of the finished itinerary, done -- see `tripcrew/pdf_export.py`.
 4. A follow-up chatbot that answers questions about the generated plan,
-   now planned as a knowledge graph over the `TripPlan` object rather than
-   a RAG pipeline, since the data's already structured and graph traversal
-   avoids a class of hallucination risk an LLM-generated answer wouldn't.
-   Explicitly a separate, later phase.
+   done -- see `tripcrew/followup.py`. Classify-then-lookup, not RAG: one
+   LLM call picks which part of the plan a question is about, plain Python
+   answers from the real `TripPlan` data. The LLM never sees or writes the
+   actual answer text, which is the whole point, a RAG-style answer risks
+   stating a detail that sounds plausible but isn't actually in the plan.
 5. Testing, properly. `evaluation/README.md` lays out why promptfoo and
    deepeval are scoped to different layers (agent behavior versus answer
    quality) instead of picking one and using it for both.

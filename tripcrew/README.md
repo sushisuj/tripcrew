@@ -32,6 +32,10 @@ process that doesn't clear on a reasonable timeline. See
 `docs/architecture.rst` for the full reasoning and what the realistic path
 forward looks like.
 
+Once a trip is fully planned, the sidebar offers it as a downloadable PDF
+(`tripcrew/pdf_export.py`), built from the same consolidated `TripPlan`
+the budget came from, not a re-formatted copy of the chat text.
+
 ## Where this is headed
 
 The plan, in rough order:
@@ -44,7 +48,7 @@ The plan, in rough order:
    reasoning in `docs/architecture.rst`.
 2. The food research agent and its tool, once it's worth the second
    Geoapify integration.
-3. Exporting the finished itinerary to PDF.
+3. PDF export of the finished itinerary, done -- see `tripcrew/pdf_export.py`.
 4. A follow-up chatbot that answers questions about the generated plan,
    now planned as a knowledge graph over the `TripPlan` object rather than
    a RAG pipeline, since the data's already structured and graph traversal

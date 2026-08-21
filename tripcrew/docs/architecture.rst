@@ -136,10 +136,37 @@ dict. ``estimate_budget()`` now coerces its inputs with
 ``Model.model_validate(...)`` at the top instead of assuming the type hints
 are enforced automatically.
 
+PDF export
+-------------
+
+``tripcrew/pdf_export.py`` renders a finished plan to a downloadable PDF,
+offered as a sidebar button once the full crew finishes. It reads the same
+consolidated ``TripPlan`` the sidebar itself now shows (see "Reflects the
+final consolidated plan" in ``app.py``'s ``render_sidebar()`` docstring),
+not a re-parsed copy of the presenter's free-text write-up, and every
+number on the page comes from ``TripPlan.budget``, the same groundedness
+rule ``estimate_budget()`` follows above: this module never computes a
+total, sum, or price of its own.
+
+It isn't a CrewAI ``@tool`` and doesn't live under ``tripcrew/tools/``,
+nothing here is called by an agent, ``app.py`` calls ``build_trip_pdf()``
+directly. Built with reportlab's Platypus layer (``SimpleDocTemplate`` plus
+``Paragraph``/``Table`` flowables), pure Python, no system dependency like
+a headless browser or ``wkhtmltopdf``. One real bug caught while building
+this, worth remembering if the module gets touched again: reportlab's
+``Table`` renders plain string cells literally, it does not run them
+through the XML-flavored markup parser that ``Paragraph`` uses for ``<``,
+``>``, and ``&``. Escaping table-cell text (a flight route formatted as
+``"JFK -> LIS"``, say) produced a literal ``-&gt;`` on the rendered page
+instead of ``->``. Caught by rendering an actual sample and reading it back
+with ``pypdf``, not by the build succeeding without raising, since an
+unescaped ``<`` or ``&`` reaching a ``Paragraph`` *would* raise, which is
+what made the bug easy to miss at first: escaping felt like the safe
+default everywhere.
+
 Not yet designed
 -------------------
 
-- The PDF export step
 - The food research agent and its tool, deferred as described above
 - The follow-up chatbot, now planned as a knowledge graph over the
   generated ``TripPlan`` rather than a RAG pipeline. ``TripPlan`` is

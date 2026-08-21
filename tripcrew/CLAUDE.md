@@ -71,6 +71,16 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
 - New tools should follow the shape already in `tripcrew/tools/`: a single
   `@tool`-decorated function, a pydantic return type from `schemas.py`, and
   a docstring that says what's real versus what's a placeholder.
+- `tripcrew/pdf_export.py` is deliberately not under `tripcrew/tools/`: no
+  agent calls it, app.py calls `build_trip_pdf()` directly once a trip is
+  fully planned. Every number in it comes straight from `TripPlan.budget`,
+  it never recomputes a total itself, same groundedness rule as the rest of
+  this project. One easy-to-reintroduce bug if this gets touched: reportlab
+  `Table` cells render plain strings literally (no XML parsing), but
+  `Paragraph` objects parse `<`, `>`, `&` as markup, so `escape()` belongs
+  on Paragraph text only, escaping a Table cell produces a literal
+  `-&gt;` on the page. Confirmed by rendering a sample and reading it back,
+  not just eyeballing the build succeeding.
 
 ## Architecture note: multi-agent, not single-agent
 
@@ -96,7 +106,6 @@ known inefficiency of intake running twice.
   research is deferred until its tool exists.
 - The food/restaurant search tool (planned: Geoapify, same pattern as
   `attractions.py`, different `categories` filter).
-- PDF export of the finished plan.
 - The follow-up chatbot, now planned as a knowledge graph over the
   generated `TripPlan` (graph traversal, not an LLM call, not a RAG
   pipeline), explicitly a separate later phase. See

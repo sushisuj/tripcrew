@@ -18,6 +18,8 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from tripcrew.agent import build_crew, build_intake_crew
+from tripcrew.pdf_export import build_trip_pdf
+from tripcrew.schemas import TripPlan
 
 load_dotenv()
 st.set_page_config(page_title="tripcrew", layout="centered", initial_sidebar_state="expanded")
@@ -121,6 +123,13 @@ if "conversation" not in st.session_state:
     st.session_state.conversation = ""
 if "trip_plan" not in st.session_state:
     st.session_state.trip_plan = None
+if "trip_write_up" not in st.session_state:
+    # Only ever set once the full crew actually finishes (see the
+    # `if prompt:` block below), never during the clarification loop --
+    # its presence is what render_sidebar() checks to decide whether
+    # there's a finished plan worth offering as a PDF, rather than trying
+    # to infer "finished" from TripPlan's own fields.
+    st.session_state.trip_write_up = None
 
 
 def render_sidebar() -> None:
@@ -134,11 +143,13 @@ def render_sidebar() -> None:
     they're read off those instead of inventing new schema fields just for
     display.
 
-    Doesn't yet reflect the final consolidated plan once the full crew
-    finishes, only the draft, real budget included. build_crew().kickoff()
-    only exposes the presentation task's free-text write-up, not the
-    consolidation task's structured TripPlan, so there's nothing
-    consolidated to show here yet. Follow-up, not solved in this pass.
+    Reflects the final consolidated plan once the full crew finishes, not
+    just the pre-crew draft: the `if prompt:` block pulls the consolidation
+    task's structured TripPlan (the one with the real computed budget) out
+    of the crew result and overwrites st.session_state.trip_plan with it.
+    Previously this only ever showed the draft, real budget included, since
+    build_crew().kickoff()'s own .pydantic is the last task's output (the
+    presenter's free-text write-up, not the consolidation task's TripPlan).
     """
     plan = st.session_state.trip_plan
 
@@ -159,12 +170,28 @@ def render_sidebar() -> None:
             st.sidebar.markdown('<div class="heading-orange">Still need</div>', unsafe_allow_html=True)
             for question in plan.open_questions:
                 st.sidebar.write(f"- {question}")
+        elif st.session_state.trip_write_up:
+            # trip_write_up only gets set once the full crew finishes (see
+            # the `if prompt:` block), so its presence here means `plan` is
+            # the real consolidated TripPlan, not the pre-crew draft --
+            # safe to hand both to build_trip_pdf. Rebuilt on every rerun
+            # rather than cached: it's a fast, local, no-network render, not
+            # worth the staleness risk of caching it against "Start over"
+            # or a follow-up message forgetting to invalidate it.
+            pdf_bytes = build_trip_pdf(plan, st.session_state.trip_write_up)
+            st.sidebar.download_button(
+                "Download trip plan (PDF)",
+                data=pdf_bytes,
+                file_name=f"{plan.destination.lower().replace(' ', '_')}_trip_plan.pdf",
+                mime="application/pdf",
+            )
 
     st.sidebar.divider()
     if st.sidebar.button("Start over"):
         st.session_state.messages = []
         st.session_state.conversation = ""
         st.session_state.trip_plan = None
+        st.session_state.trip_write_up = None
         st.rerun()
 
 
@@ -235,7 +262,26 @@ if prompt:
                     inputs={"request": st.session_state.conversation}
                 )
                 status.update(label="Trip planned", state="complete")
+
+            # kickoff()'s own .pydantic is the LAST task's output (the
+            # presenter's, which has no output_pydantic set -- confirmed
+            # via crew.py's _create_crew_output, it just copies whichever
+            # task ran last). The real structured plan, with the actual
+            # computed budget, lives on the consolidation task specifically,
+            # found here by type rather than a fixed list index so this
+            # doesn't silently break if build_crew()'s task order ever
+            # changes. Previously the sidebar kept showing the pre-crew
+            # draft even after the full plan finished (see render_sidebar's
+            # own docstring) -- this is that fix.
+            consolidated_plan = next(
+                (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
+                None,
+            )
+            if consolidated_plan is not None:
+                st.session_state.trip_plan = consolidated_plan
+
             response = str(result)
+            st.session_state.trip_write_up = response
             st.write(response)
 
     st.session_state.messages.append({"role": "assistant", "content": response})

@@ -5,6 +5,7 @@ instant signup, no approval gate, unlike flights and hotels.
 """
 
 import os
+from datetime import datetime
 
 import requests
 from crewai.tools import tool
@@ -41,6 +42,27 @@ def _geocode(city: str) -> tuple[float, float]:
     return results[0]["lat"], results[0]["lon"]
 
 
+def _closest_forecast_entry(entries: list[dict], target_date: str) -> dict:
+    """Picks the forecast entry whose date is closest to `target_date` (ISO,
+    e.g. 2026-09-01), instead of always taking the first entry (roughly
+    "now") regardless of which date was actually requested -- that mismatch
+    is why every day of a trip was coming back with the identical forecast.
+
+    OpenWeatherMap's free tier only forecasts 5 days out, so a target_date
+    further out than that just means the closest available entry gets
+    used, still an approximation, not an exact match -- that limitation is
+    the separate, still-open TODO below, this function only fixes which
+    entry gets picked among the ones OpenWeatherMap actually returned.
+    """
+    target = datetime.fromisoformat(target_date).date()
+    return min(
+        entries,
+        key=lambda entry: abs(
+            (datetime.strptime(entry["dt_txt"], "%Y-%m-%d %H:%M:%S").date() - target).days
+        ),
+    )
+
+
 @tool("Weather Lookup")
 def get_weather(city: str, date: str) -> WeatherReport | None:
     """Look up the forecast for a city on a given date (ISO format, e.g. 2026-09-01).
@@ -73,11 +95,9 @@ def get_weather(city: str, date: str) -> WeatherReport | None:
         response.raise_for_status()
         data = response.json()
 
-        # TODO: match the closest forecast entry to `date` instead of just
-        # grabbing the first one. Placeholder for now -- start small.
-        first = data["list"][0]
-        summary = f"{first['weather'][0]['description']}, {first['main']['temp']}C"
-    except (WeatherUnavailable, requests.RequestException, KeyError, IndexError):
+        entry = _closest_forecast_entry(data["list"], date)
+        summary = f"{entry['weather'][0]['description']}, {entry['main']['temp']}C"
+    except (WeatherUnavailable, requests.RequestException, KeyError, IndexError, ValueError):
         return None
 
     return WeatherReport(city=city, date=date, summary=summary)

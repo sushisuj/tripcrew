@@ -42,6 +42,12 @@ def estimate_budget(
     attractions.py), which meant attractions_usd was always 0 and nothing
     ever said so. unpriced_categories exists so that's visible instead of
     silent.
+
+    Flight pricing takes the genuinely cheapest priced option, not just
+    whichever came first in the list -- flights[:1] used to be the actual
+    logic here despite a comment claiming "cheapest," which meant the
+    budget could (and did) report a pricier flight while a cheaper one sat
+    right next to it in the same list.
     """
     # CrewAI hands this function whatever the LLM's tool call JSON deserializes
     # to, plain dicts, not Flight/Hotel/Attraction instances, even though the
@@ -53,8 +59,9 @@ def estimate_budget(
     hotel = hotel if hotel is None or isinstance(hotel, Hotel) else Hotel.model_validate(hotel)
     attractions = [a if isinstance(a, Attraction) else Attraction.model_validate(a) for a in attractions]
 
-    priced_flights = [f for f in flights[:1] if f.price_usd is not None]  # cheapest/first option only
-    flights_total = sum(f.price_usd for f in priced_flights)
+    priced_flights = [f for f in flights if f.price_usd is not None]
+    cheapest_flight = min(priced_flights, key=lambda f: f.price_usd) if priced_flights else None
+    flights_total = cheapest_flight.price_usd if cheapest_flight is not None else 0
 
     hotel_total = (hotel.price_per_night_usd or 0) * nights if hotel and hotel.price_per_night_usd is not None else 0
 

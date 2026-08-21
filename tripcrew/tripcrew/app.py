@@ -9,6 +9,14 @@ once for real and shows the presenter agent's write-up -- passing the
 already-satisfied draft straight in so the full crew doesn't rerun intake
 from scratch, see agent.py's build_crew() docstring.
 
+Once a trip is finished (st.session_state.trip_write_up is set), the next
+message stops feeding the intake loop entirely and becomes a follow-up
+question about that trip instead, answered by followup.answer_trip_question().
+"Start over" (see render_sidebar()) is the explicit way to plan a different
+trip -- without that split, asking "what's the weather like" after a plan
+finishes would just get appended to the conversation and rerun through
+intake, which has nothing to do with answering it.
+
 The sidebar shows the same draft TripPlan that already decides whether to
 ask a clarifying question, nothing new is computed for it. It's a status
 panel, not a second source of truth.
@@ -18,6 +26,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from tripcrew.agent import build_crew, build_intake_crew
+from tripcrew.followup import answer_trip_question
 from tripcrew.pdf_export import build_trip_pdf
 from tripcrew.schemas import TripPlan
 
@@ -196,93 +205,104 @@ def render_sidebar() -> None:
 
 
 st.title("tripcrew")
-st.caption("Tell it where you want to go. It'll ask if it needs more.")
+if st.session_state.trip_write_up:
+    st.caption("Trip's planned. Ask about flights, hotel, attractions, weather, or budget, or start over.")
+else:
+    st.caption("Tell it where you want to go. It'll ask if it needs more.")
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-prompt = st.chat_input("Plan a trip...")
+prompt = st.chat_input("Ask about your trip..." if st.session_state.trip_write_up else "Plan a trip...")
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
 
-    st.session_state.conversation += f"\n{prompt}"
-
     with st.chat_message("assistant"):
-        with st.spinner("Checking what's needed..."):
-            intake_result = build_intake_crew().kickoff(
-                inputs={"request": st.session_state.conversation}
-            )
-            draft_plan = intake_result.pydantic
-            st.session_state.trip_plan = draft_plan
-
-        if draft_plan and draft_plan.open_questions:
-            response = "Before I plan this, I need a bit more:\n\n" + "\n".join(
-                f"- {q}" for q in draft_plan.open_questions
-            )
+        if st.session_state.trip_write_up:
+            # A trip's already finished -- this message is a follow-up
+            # question about it, not more planning input. See the module
+            # docstring for why that split exists.
+            with st.spinner("Checking your trip plan..."):
+                response = answer_trip_question(st.session_state.trip_plan, prompt)
             st.write(response)
         else:
-            # A live step indicator, not just a spinner. build_crew(intake_plan=...)
-            # runs itinerary research, consolidation, and presentation in that
-            # fixed order (Process.sequential), so task_callback firing once
-            # per completed task can be counted against STAGE_LABELS below to
-            # know which stage just finished -- CrewAI's own hook (confirmed
-            # in its source: crew_task_callback fires as task.callback(task.output)
-            # right after each task completes), nothing bolted on. kickoff()
-            # is a normal blocking call, so this callback runs synchronously
-            # from inside it; calling .write() on the status object we already
-            # hold updates the same widget immediately, no rerun needed, the
-            # same mechanism st.progress() and st.status() are built for.
-            STAGE_LABELS = [
-                "Researching attractions & weather",
-                "Consolidating the plan & budget",
-                "Writing it up",
-            ]
-            with st.status("Planning the full trip...", expanded=True) as status:
-                stage_count = {"done": 0}
+            st.session_state.conversation += f"\n{prompt}"
 
-                def mark_stage_done(task_output):
-                    # Deliberately swallows everything -- a failure updating
-                    # the status widget must never be able to take the real
-                    # crew run down with it (build_crew()'s task_callback
-                    # isn't wrapped in try/except itself, this is where that
-                    # safety has to live instead).
-                    try:
-                        i = stage_count["done"]
-                        if i < len(STAGE_LABELS):
-                            status.write(f"✓ {STAGE_LABELS[i]}")
-                        stage_count["done"] += 1
-                    except Exception:
-                        pass
-
-                result = build_crew(intake_plan=draft_plan, task_callback=mark_stage_done).kickoff(
+            with st.spinner("Checking what's needed..."):
+                intake_result = build_intake_crew().kickoff(
                     inputs={"request": st.session_state.conversation}
                 )
-                status.update(label="Trip planned", state="complete")
+                draft_plan = intake_result.pydantic
+                st.session_state.trip_plan = draft_plan
 
-            # kickoff()'s own .pydantic is the LAST task's output (the
-            # presenter's, which has no output_pydantic set -- confirmed
-            # via crew.py's _create_crew_output, it just copies whichever
-            # task ran last). The real structured plan, with the actual
-            # computed budget, lives on the consolidation task specifically,
-            # found here by type rather than a fixed list index so this
-            # doesn't silently break if build_crew()'s task order ever
-            # changes. Previously the sidebar kept showing the pre-crew
-            # draft even after the full plan finished (see render_sidebar's
-            # own docstring) -- this is that fix.
-            consolidated_plan = next(
-                (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
-                None,
-            )
-            if consolidated_plan is not None:
-                st.session_state.trip_plan = consolidated_plan
+            if draft_plan and draft_plan.open_questions:
+                response = "Before I plan this, I need a bit more:\n\n" + "\n".join(
+                    f"- {q}" for q in draft_plan.open_questions
+                )
+                st.write(response)
+            else:
+                # A live step indicator, not just a spinner. build_crew(intake_plan=...)
+                # runs itinerary research, consolidation, and presentation in that
+                # fixed order (Process.sequential), so task_callback firing once
+                # per completed task can be counted against STAGE_LABELS below to
+                # know which stage just finished -- CrewAI's own hook (confirmed
+                # in its source: crew_task_callback fires as task.callback(task.output)
+                # right after each task completes), nothing bolted on. kickoff()
+                # is a normal blocking call, so this callback runs synchronously
+                # from inside it; calling .write() on the status object we already
+                # hold updates the same widget immediately, no rerun needed, the
+                # same mechanism st.progress() and st.status() are built for.
+                STAGE_LABELS = [
+                    "Researching attractions & weather",
+                    "Consolidating the plan & budget",
+                    "Writing it up",
+                ]
+                with st.status("Planning the full trip...", expanded=True) as status:
+                    stage_count = {"done": 0}
 
-            response = str(result)
-            st.session_state.trip_write_up = response
-            st.write(response)
+                    def mark_stage_done(task_output):
+                        # Deliberately swallows everything -- a failure updating
+                        # the status widget must never be able to take the real
+                        # crew run down with it (build_crew()'s task_callback
+                        # isn't wrapped in try/except itself, this is where that
+                        # safety has to live instead).
+                        try:
+                            i = stage_count["done"]
+                            if i < len(STAGE_LABELS):
+                                status.write(f"✓ {STAGE_LABELS[i]}")
+                            stage_count["done"] += 1
+                        except Exception:
+                            pass
+
+                    result = build_crew(intake_plan=draft_plan, task_callback=mark_stage_done).kickoff(
+                        inputs={"request": st.session_state.conversation}
+                    )
+                    status.update(label="Trip planned", state="complete")
+
+                # kickoff()'s own .pydantic is the LAST task's output (the
+                # presenter's, which has no output_pydantic set -- confirmed
+                # via crew.py's _create_crew_output, it just copies whichever
+                # task ran last). The real structured plan, with the actual
+                # computed budget, lives on the consolidation task specifically,
+                # found here by type rather than a fixed list index so this
+                # doesn't silently break if build_crew()'s task order ever
+                # changes. Previously the sidebar kept showing the pre-crew
+                # draft even after the full plan finished (see render_sidebar's
+                # own docstring) -- this is that fix.
+                consolidated_plan = next(
+                    (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
+                    None,
+                )
+                if consolidated_plan is not None:
+                    st.session_state.trip_plan = consolidated_plan
+
+                response = str(result)
+                st.session_state.trip_write_up = response
+                st.write(response)
 
     st.session_state.messages.append({"role": "assistant", "content": response})
 

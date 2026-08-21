@@ -16,9 +16,11 @@ is easier to debug when a task's output is wrong.
 
 import os
 from datetime import date, timedelta
+from typing import Callable
 
 import crewai.llms.cache as _crewai_cache
 from crewai import LLM, Agent, Crew, Process, Task
+from crewai.tasks.task_output import TaskOutput
 
 from tripcrew.schemas import TripPlan
 from tripcrew.tools.attractions import get_attractions
@@ -369,7 +371,10 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
     )
 
 
-def build_crew(intake_plan: TripPlan | None = None) -> Crew:
+def build_crew(
+    intake_plan: TripPlan | None = None,
+    task_callback: Callable[[TaskOutput], None] | None = None,
+) -> Crew:
     """Assembles the chained tasks into a Process.sequential Crew. This is
     what app.py should call, not the individual builder functions above --
     those exist mainly so this function and tests can construct pieces
@@ -389,6 +394,16 @@ def build_crew(intake_plan: TripPlan | None = None) -> Crew:
 
     Passing no intake_plan keeps the original four-task chain, for tests
     or any caller that doesn't already have a satisfied draft on hand.
+
+    task_callback is Crew's own hook (confirmed via the installed crewai
+    source, crew.py/task.py: fires once per task, right after that task
+    finishes, called as task_callback(task.output)), not something bolted
+    on here. Process.sequential guarantees tasks complete in list order, so
+    app.py can count calls against a fixed stage-label list to build a live
+    step indicator without CrewAI needing to know anything about Streamlit.
+    Not wrapped in a try/except here on purpose -- app.py's callback is
+    responsible for not raising, a UI update failing should never be able
+    to take the actual crew run down with it.
     """
     itinerary_agent = build_itinerary_agent()
     consolidation_agent = build_consolidation_agent()
@@ -404,6 +419,7 @@ def build_crew(intake_plan: TripPlan | None = None) -> Crew:
             process=Process.sequential,
             tracing=False,
             verbose=True,
+            task_callback=task_callback,
         )
 
     intake_agent = build_intake_agent()
@@ -418,6 +434,7 @@ def build_crew(intake_plan: TripPlan | None = None) -> Crew:
         process=Process.sequential,
         tracing=False,
         verbose=True,
+        task_callback=task_callback,
     )
 
 

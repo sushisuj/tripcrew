@@ -89,14 +89,27 @@ st.markdown(
 
     /* Denser sidebar type, an old portal nav packed a lot into a narrow
        column instead of Streamlit's default generous spacing. Scoped to
-       the sidebar only, the chat itself keeps its normal readable size. */
+       the sidebar only, the chat itself keeps its normal readable size.
+       color is set explicitly here rather than left to theme.textColor:
+       the theme's #26263D against this sidebar's #6E8CC7 background comes
+       out to a 4.37:1 WCAG contrast ratio, just under the 4.5:1 AA
+       threshold for text this small, computed directly rather than
+       eyeballed. #1A1A1A clears it at 5.17:1. */
     [data-testid="stSidebar"] p, [data-testid="stSidebar"] li {
         font-size: 13px;
         line-height: 1.3;
         margin-bottom: 0.25rem;
+        color: #1A1A1A;
     }
-    .heading-purple { color: #6B4A9E; font-weight: bold; font-size: 14px; }
-    .heading-orange { color: #B35900; font-weight: bold; font-size: 14px; }
+    /* Same reasoning as the rule above, worse starting point: the original
+       #6B4A9E purple and #B35900 orange against this sidebar's blue
+       measured at 2.01:1 and 1.44:1, badly failing AA. Any color that
+       clears 4.5:1 against this particular blue ends up dark enough to
+       read as near-black -- the tradeoff Sujan chose over adding a light
+       chip behind each heading. Still tinted (deep plum, dark rust), just
+       far darker than the original brand colors. */
+    .heading-purple { color: #2B1E3F; font-weight: bold; font-size: 14px; }
+    .heading-orange { color: #391C00; font-weight: bold; font-size: 14px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -185,10 +198,43 @@ if prompt:
             )
             st.write(response)
         else:
-            with st.spinner("Planning the full trip..."):
-                result = build_crew(intake_plan=draft_plan).kickoff(
+            # A live step indicator, not just a spinner. build_crew(intake_plan=...)
+            # runs itinerary research, consolidation, and presentation in that
+            # fixed order (Process.sequential), so task_callback firing once
+            # per completed task can be counted against STAGE_LABELS below to
+            # know which stage just finished -- CrewAI's own hook (confirmed
+            # in its source: crew_task_callback fires as task.callback(task.output)
+            # right after each task completes), nothing bolted on. kickoff()
+            # is a normal blocking call, so this callback runs synchronously
+            # from inside it; calling .write() on the status object we already
+            # hold updates the same widget immediately, no rerun needed, the
+            # same mechanism st.progress() and st.status() are built for.
+            STAGE_LABELS = [
+                "Researching attractions & weather",
+                "Consolidating the plan & budget",
+                "Writing it up",
+            ]
+            with st.status("Planning the full trip...", expanded=True) as status:
+                stage_count = {"done": 0}
+
+                def mark_stage_done(task_output):
+                    # Deliberately swallows everything -- a failure updating
+                    # the status widget must never be able to take the real
+                    # crew run down with it (build_crew()'s task_callback
+                    # isn't wrapped in try/except itself, this is where that
+                    # safety has to live instead).
+                    try:
+                        i = stage_count["done"]
+                        if i < len(STAGE_LABELS):
+                            status.write(f"✓ {STAGE_LABELS[i]}")
+                        stage_count["done"] += 1
+                    except Exception:
+                        pass
+
+                result = build_crew(intake_plan=draft_plan, task_callback=mark_stage_done).kickoff(
                     inputs={"request": st.session_state.conversation}
                 )
+                status.update(label="Trip planned", state="complete")
             response = str(result)
             st.write(response)
 

@@ -85,3 +85,24 @@ class TripPlan(BaseModel):
         description="Anything the agent needed from the user but didn't have -- "
         "populated instead of guessing",
     )
+
+
+class TripQuestionIntent(BaseModel):
+    """Output of the follow-up chatbot's classification step (see
+    followup.py). Deliberately thin: the LLM only picks which part of an
+    already-finished TripPlan a question is about, it never sees or writes
+    the actual answer. Answering is plain Python, reading real fields off
+    TripPlan -- that split is what "graph traversal, not a RAG pipeline"
+    (docs/architecture.rst) actually means in code: the LLM's output here
+    can never contain a fact, only a pointer to where a fact already is.
+    """
+
+    category: Literal["flights", "hotel", "attractions", "weather", "budget", "unclear"] = Field(
+        description="Which part of the trip plan the question is about. 'unclear' if none fit."
+    )
+    date: Optional[str] = Field(
+        default=None,
+        description="Only for a weather question about one specific day. Must be one of the "
+        "trip's actual forecast dates, given in the task description -- never a guessed or "
+        "invented date, and never set for any category other than weather.",
+    )

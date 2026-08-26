@@ -51,6 +51,25 @@ def _geocode(city: str, api_key: str) -> tuple[float, float]:
         raise AttractionsUnavailable(f"Geocoding request failed for {city}: {e}") from e
 
 
+def _fetch_places(lat: float, lon: float, api_key: str, limit: int) -> list[dict]:
+    """One Places API call. Split out from get_attractions so the notability
+    filter (added next) can call it twice -- once restricted to notable
+    POIs, once as an unfiltered fallback -- without duplicating the
+    request-building logic between the two.
+    """
+    params = {
+        "categories": ATTRACTION_CATEGORIES,
+        "filter": f"circle:{lon},{lat},{SEARCH_RADIUS_METERS}",
+        "limit": limit,
+        "apiKey": api_key,
+    }
+    response = requests.get(GEOAPIFY_PLACES, params=params, timeout=10)
+    response.raise_for_status()
+    # Places API returns a GeoJSON FeatureCollection, not a flat list --
+    # the actual fields live under each feature's "properties".
+    return response.json()["features"]
+
+
 @tool("Attraction Lookup")
 def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
     """Find notable tourist attractions in a city.
@@ -72,20 +91,7 @@ def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
 
     try:
         lat, lon = _geocode(city, api_key)
-        response = requests.get(
-            GEOAPIFY_PLACES,
-            params={
-                "categories": ATTRACTION_CATEGORIES,
-                "filter": f"circle:{lon},{lat},{SEARCH_RADIUS_METERS}",
-                "limit": limit,
-                "apiKey": api_key,
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        # Places API returns a GeoJSON FeatureCollection, not a flat list --
-        # the actual fields live under each feature's "properties".
-        features = response.json()["features"]
+        features = _fetch_places(lat, lon, api_key, limit)
     except (AttractionsUnavailable, requests.RequestException, KeyError):
         return []
 

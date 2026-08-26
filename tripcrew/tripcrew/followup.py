@@ -58,13 +58,14 @@ def build_intent_task(agent: Agent, trip_plan: TripPlan, question: str) -> Task:
             f"{weather_dates}\n\n"
             f'The traveler is now asking: "{question}"\n\n'
             "Classify what they're asking about: flights, hotel, attractions, "
-            "weather, or budget. If it's a weather question about a specific day "
-            "('day 2', 'the first day', a weekday name, an actual date), resolve "
-            "it to exactly one of the dates listed above and put it in the date "
-            "field -- only use a date that's actually listed, leave date empty "
-            "rather than guess if it doesn't clearly point to one of them. If the "
-            "question doesn't clearly match any of the five categories, use "
-            "'unclear' rather than forcing it into one that doesn't fit."
+            "restaurants, weather, or budget. If it's a weather question about a "
+            "specific day ('day 2', 'the first day', a weekday name, an actual "
+            "date), resolve it to exactly one of the dates listed above and put "
+            "it in the date field -- only use a date that's actually listed, "
+            "leave date empty rather than guess if it doesn't clearly point to "
+            "one of them. If the question doesn't clearly match any of the six "
+            "categories, use 'unclear' rather than forcing it into one that "
+            "doesn't fit."
         ),
         expected_output=(
             "A TripQuestionIntent with the right category, and a date only when "
@@ -112,6 +113,15 @@ def format_answer(trip_plan: TripPlan, intent: TripQuestionIntent) -> str:
         ]
         return "Attractions for this trip:\n" + "\n".join(lines)
 
+    if intent.category == "restaurants":
+        if not trip_plan.restaurants:
+            return "No restaurants are available for this trip."
+        lines = [
+            f"- {restaurant.name}" + (f" ({restaurant.category})" if restaurant.category else "")
+            for restaurant in trip_plan.restaurants
+        ]
+        return "Restaurants and cafes near this trip's destination (not a rated or curated list, just what's nearby):\n" + "\n".join(lines)
+
     if intent.category == "weather":
         if not trip_plan.weather:
             return "No weather forecast is available for this trip."
@@ -135,6 +145,7 @@ def format_answer(trip_plan: TripPlan, intent: TripQuestionIntent) -> str:
             f"- Flights: ${budget.flights_usd:,.2f}",
             f"- Hotel: ${budget.hotel_usd:,.2f}",
             f"- Attractions: ${budget.attractions_usd:,.2f}",
+            f"- Restaurants: ${budget.restaurants_usd:,.2f}",
             f"- Total: ${budget.total_usd:,.2f}",
         ]
         if budget.unpriced_categories:
@@ -143,7 +154,8 @@ def format_answer(trip_plan: TripPlan, intent: TripQuestionIntent) -> str:
 
     return (
         "I can only answer questions about this trip's flights, hotel, "
-        "attractions, weather, or budget. Try asking about one of those."
+        "attractions, restaurants, weather, or budget. Try asking about one "
+        "of those."
     )
 
 
@@ -157,6 +169,7 @@ def answer_trip_question(trip_plan: TripPlan, question: str) -> str:
     if intent is None:
         return (
             "Sorry, I couldn't figure out what you're asking. Try asking about "
-            "flights, hotel, attractions, weather, or budget for this trip."
+            "flights, hotel, attractions, restaurants, weather, or budget for "
+            "this trip."
         )
     return format_answer(trip_plan, intent)

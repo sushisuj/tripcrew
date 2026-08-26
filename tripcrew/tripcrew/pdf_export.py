@@ -130,6 +130,26 @@ def build_trip_pdf(trip_plan: TripPlan, write_up: str) -> bytes:
         story.append(Paragraph("No attractions available for this trip.", _STYLES["Normal"]))
     story.append(Spacer(1, 10))
 
+    story.append(Paragraph("Restaurants", _HEADING_STYLE))
+    if trip_plan.restaurants:
+        rows = [["Name", "Category"]]
+        for restaurant in trip_plan.restaurants:
+            rows.append([restaurant.name, restaurant.category or "—"])
+        story.append(_table(rows, col_widths=[3.5 * inch, 3 * inch]))
+        story.append(Spacer(1, 6))
+        story.append(
+            Paragraph(
+                escape(
+                    "Note: these are places nearby in the restaurant/cafe/fast-food "
+                    "categories, not a rated or curated list."
+                ),
+                _STYLES["Italic"],
+            )
+        )
+    else:
+        story.append(Paragraph("No restaurants available for this trip.", _STYLES["Normal"]))
+    story.append(Spacer(1, 10))
+
     story.append(Paragraph("Weather", _HEADING_STYLE))
     if trip_plan.weather:
         rows = [["Date", "Forecast"]]
@@ -160,6 +180,7 @@ def build_trip_pdf(trip_plan: TripPlan, write_up: str) -> bytes:
         ["Flights", f"${budget.flights_usd:,.2f}"],
         ["Hotel", f"${budget.hotel_usd:,.2f}"],
         ["Attractions", f"${budget.attractions_usd:,.2f}"],
+        ["Restaurants", f"${budget.restaurants_usd:,.2f}"],
         ["Total", f"${budget.total_usd:,.2f}"],
     ]
     story.append(_table(rows, col_widths=[3 * inch, 2 * inch]))

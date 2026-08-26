@@ -1,10 +1,9 @@
 """Agent role definitions for the sequential crew.
 
-Four roles for now (food research deferred until its tool exists, see
-docs/architecture.rst): intake/coordinator owns flights, hotels, and the
-clarification loop; itinerary research owns attractions and weather;
-consolidation merges everything into a TripPlan with a computed budget;
-presentation formats the result for the user.
+Five roles: intake/coordinator owns flights, hotels, and the clarification
+loop; itinerary research owns attractions and weather; food research owns
+restaurants and cafes; consolidation merges everything into a TripPlan with
+a computed budget; presentation formats the result for the user.
 
 This file defines the agents, their chained tasks, and the Crew that runs
 them under Process.sequential. Sequential over hierarchical is deliberate,
@@ -27,6 +26,7 @@ from tripcrew.tools.attractions import get_attractions
 from tripcrew.tools.budget import estimate_budget
 from tripcrew.tools.flights import search_flights
 from tripcrew.tools.hotels import search_hotels
+from tripcrew.tools.restaurants import get_restaurants
 from tripcrew.tools.weather import get_weather
 
 # CrewAI (as of 1.15.x) unconditionally tags every message with a
@@ -111,29 +111,56 @@ def build_itinerary_agent() -> Agent:
     )
 
 
+def build_food_agent() -> Agent:
+    """Owns restaurants and cafes. Runs after intake, using its dates, same
+    shape as the itinerary agent, but doesn't touch attractions/weather --
+    was the fifth role docs/architecture.rst described from the start,
+    deferred until get_restaurants() existed.
+
+    get_restaurants() has no notability or quality filter, unlike
+    get_attractions() (see restaurants.py's own docstring for why that
+    doesn't translate to food), so this agent's goal is worded around
+    "what's nearby," not "what's best."
+    """
+    llm = build_llm()
+    return Agent(
+        role="Food Researcher",
+        goal="Find restaurants and cafes near the destination for the traveler to consider.",
+        backstory=(
+            "A local-options scout, not a critic -- reports what the tool "
+            "actually found nearby, never claims a place is recommended or "
+            "highly rated when the tool didn't say so."
+        ),
+        tools=[get_restaurants],
+        llm=llm,
+        verbose=True,
+    )
+
+
 def build_consolidation_agent() -> Agent:
-    """Merges intake and itinerary output into one TripPlan.
+    """Merges intake, itinerary, and food output into one TripPlan.
 
     Has exactly one tool, estimate_budget, and it's not optional: this agent
     used to have none, which meant it wrote Budget.total_usd itself as part
     of its own output_pydantic response, exactly the "LLM states a derived
     number" failure the rest of this project is built to avoid. Now it has
-    to hand the gathered flight/hotel/attraction data to a real function and
-    use what comes back.
+    to hand the gathered flight/hotel/attraction/restaurant data to a real
+    function and use what comes back.
     """
     llm = build_llm()
     return Agent(
         role="Trip Consolidator",
         goal=(
-            "Merge the intake and itinerary research into one coherent trip "
-            "plan. Call the Budget Estimator tool with the actual flight, "
-            "hotel, and attraction data to get the budget, never write a "
-            "total from memory."
+            "Merge the intake, itinerary, and food research into one "
+            "coherent trip plan. Call the Budget Estimator tool with the "
+            "actual flight, hotel, attraction, and restaurant data to get "
+            "the budget, never write a total from memory."
         ),
         backstory=(
             "A meticulous editor who never lets a total stand unless it "
             "came back from the Budget Estimator tool, fed with the real "
-            "flight, hotel, and attraction costs already gathered."
+            "flight, hotel, attraction, and restaurant costs already "
+            "gathered."
         ),
         tools=[estimate_budget],
         llm=llm,
@@ -300,50 +327,77 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     )
 
 
-def build_consolidation_task(agent: Agent, intake_task: Task, itinerary_task: Task) -> Task:
-    """Depends on both prior tasks. Only task with a pydantic output type --
-    this is the point where a TripPlan actually exists as structured data.
+def build_food_task(agent: Agent, intake_task: Task) -> Task:
+    """Depends on intake_task's output for destination, same as
+    build_itinerary_task -- food research doesn't need attractions or
+    weather, just destination and dates, so it chains from intake directly
+    rather than from the itinerary task.
     """
     return Task(
         description=(
-            "Merge the intake and itinerary research into one TripPlan. "
-            "Call the Budget Estimator tool with the actual flights, hotel, "
-            "attractions, and number of nights from the earlier research, "
-            "and use exactly what it returns as the budget. Don't compute "
-            "or state a total yourself, and don't change the numbers the "
-            "tool gives back, including unpriced_categories."
+            "Using the destination and dates from the intake research, find "
+            "restaurants and cafes worth listing for the traveler. The "
+            "lookup tool returns whatever's nearby in the restaurant/cafe/"
+            "fast-food categories, not a curated or rated list -- report "
+            "exactly what it returned, don't claim a place is recommended "
+            "or highly rated when the tool didn't say so. It returns an "
+            "empty result rather than an error when it can't actually look "
+            "something up -- treat an empty result as 'not available for "
+            "this trip,' don't invent a plausible-sounding restaurant to "
+            "fill the gap."
         ),
         expected_output=(
-            "A complete TripPlan with a budget that came from the Budget "
-            "Estimator tool, not a total you wrote yourself."
+            "A list of restaurants and cafes near the destination, or a "
+            "plain note that none were available if the tool came back "
+            "empty."
         ),
         agent=agent,
-        context=[intake_task, itinerary_task],
-        output_pydantic=TripPlan,
+        context=[intake_task],
     )
 
 
-def build_consolidation_task_from_plan(agent: Agent, intake_plan: TripPlan, itinerary_task: Task) -> Task:
-    """Same job as build_consolidation_task, paired with
-    build_itinerary_task_from_plan. Needs the intake plan's flights and
-    hotel data verbatim to call the Budget Estimator tool correctly, so
-    the whole plan gets embedded as JSON rather than just destination/days
-    -- unlike the itinerary task, this one can't get away with a short
-    summary. interpolate_only (CrewAI's template-filling step, runs on
-    every task description during kickoff) only substitutes bare
-    {identifier} placeholders, confirmed by reading its source, so the
-    embedded JSON's own braces don't collide with it.
+def build_food_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
+    """Same job as build_food_task, for the case where intake already ran
+    separately (build_intake_crew(), see app.py's two-phase flow). Same
+    date-baking approach as build_itinerary_task_from_plan and for the same
+    reason: there's no intake_task in this crew to chain context from.
     """
-    intake_json = intake_plan.model_dump_json(indent=2)
+    date_range = _trip_date_range(intake_plan)
     return Task(
         description=(
-            "The intake research already gathered this data, use it "
-            f"exactly as given, don't re-derive or restate it differently:\n\n{intake_json}\n\n"
-            "Merge this with the itinerary research into one TripPlan. "
-            "Call the Budget Estimator tool with the actual flights, hotel, "
-            "attractions, and number of nights from the data above and the "
-            "itinerary research, and use exactly what it returns as the "
-            "budget. Don't compute or state a total yourself, and don't "
+            f"The intake research already determined the destination is "
+            f"{intake_plan.destination!r} and the trip is {intake_plan.days} "
+            f"days. {date_range} Using this destination, find restaurants "
+            "and cafes worth listing for the traveler. The lookup tool "
+            "returns whatever's nearby in the restaurant/cafe/fast-food "
+            "categories, not a curated or rated list -- report exactly what "
+            "it returned, don't claim a place is recommended or highly "
+            "rated when the tool didn't say so. It returns an empty result "
+            "rather than an error when it can't actually look something up "
+            "-- treat an empty result as 'not available for this trip,' "
+            "don't invent a plausible-sounding restaurant to fill the gap."
+        ),
+        expected_output=(
+            "A list of restaurants and cafes near the destination, or a "
+            "plain note that none were available if the tool came back "
+            "empty."
+        ),
+        agent=agent,
+    )
+
+
+def build_consolidation_task(agent: Agent, intake_task: Task, itinerary_task: Task, food_task: Task) -> Task:
+    """Depends on all three prior research tasks. Only task with a pydantic
+    output type -- this is the point where a TripPlan actually exists as
+    structured data.
+    """
+    return Task(
+        description=(
+            "Merge the intake, itinerary, and food research into one "
+            "TripPlan. Call the Budget Estimator tool with the actual "
+            "flights, hotel, attractions, restaurants, and number of nights "
+            "from the earlier research, and use exactly what it returns as "
+            "the budget. Don't compute or state a total yourself, and don't "
             "change the numbers the tool gives back, including "
             "unpriced_categories."
         ),
@@ -352,7 +406,44 @@ def build_consolidation_task_from_plan(agent: Agent, intake_plan: TripPlan, itin
             "Estimator tool, not a total you wrote yourself."
         ),
         agent=agent,
-        context=[itinerary_task],
+        context=[intake_task, itinerary_task, food_task],
+        output_pydantic=TripPlan,
+    )
+
+
+def build_consolidation_task_from_plan(
+    agent: Agent, intake_plan: TripPlan, itinerary_task: Task, food_task: Task
+) -> Task:
+    """Same job as build_consolidation_task, paired with
+    build_itinerary_task_from_plan and build_food_task_from_plan. Needs the
+    intake plan's flights and hotel data verbatim to call the Budget
+    Estimator tool correctly, so the whole plan gets embedded as JSON
+    rather than just destination/days -- unlike the itinerary and food
+    tasks, this one can't get away with a short summary. interpolate_only
+    (CrewAI's template-filling step, runs on every task description during
+    kickoff) only substitutes bare {identifier} placeholders, confirmed by
+    reading its source, so the embedded JSON's own braces don't collide
+    with it.
+    """
+    intake_json = intake_plan.model_dump_json(indent=2)
+    return Task(
+        description=(
+            "The intake research already gathered this data, use it "
+            f"exactly as given, don't re-derive or restate it differently:\n\n{intake_json}\n\n"
+            "Merge this with the itinerary and food research into one "
+            "TripPlan. Call the Budget Estimator tool with the actual "
+            "flights, hotel, attractions, restaurants, and number of nights "
+            "from the data above and the itinerary/food research, and use "
+            "exactly what it returns as the budget. Don't compute or state "
+            "a total yourself, and don't change the numbers the tool gives "
+            "back, including unpriced_categories."
+        ),
+        expected_output=(
+            "A complete TripPlan with a budget that came from the Budget "
+            "Estimator tool, not a total you wrote yourself."
+        ),
+        agent=agent,
+        context=[itinerary_task, food_task],
         output_pydantic=TripPlan,
     )
 
@@ -363,16 +454,18 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
         description=(
             "Turn the consolidated TripPlan into a clear, practical "
             "write-up for the traveler. Present exactly what's in the "
-            "plan, don't add details the plan doesn't contain. If "
-            "budget.unpriced_categories isn't empty, say plainly that the "
-            "total doesn't include those categories, don't present it as a "
-            "complete number. If any weather report has is_approximate set, "
-            "say plainly that day's forecast is an estimate, not a real "
-            "forecast for that date."
+            "plan, don't add details the plan doesn't contain. Restaurants "
+            "came from a plain nearby-places lookup, not a rated or "
+            "curated list -- present them as options to consider, not as "
+            "recommendations. If budget.unpriced_categories isn't empty, "
+            "say plainly that the total doesn't include those categories, "
+            "don't present it as a complete number. If any weather report "
+            "has is_approximate set, say plainly that day's forecast is an "
+            "estimate, not a real forecast for that date."
         ),
         expected_output=(
             "A readable trip plan write-up covering flights, hotel, "
-            "attractions, weather, and budget."
+            "attractions, restaurants, weather, and budget."
         ),
         agent=agent,
         context=[consolidation_task],
@@ -392,15 +485,15 @@ def build_crew(
     (see app.py's two-phase flow: it runs intake alone first, checks
     open_questions, and only calls this function once that draft is
     complete). When it's given, this crew skips intake_task entirely and
-    starts from itinerary research, with the known destination/days/
-    flights/hotel baked into the remaining tasks' descriptions instead of
-    coming from a freshly-run intake_task's context. That used to be a
+    starts from itinerary and food research, with the known destination/
+    days/flights/hotel baked into the remaining tasks' descriptions instead
+    of coming from a freshly-run intake_task's context. That used to be a
     "known simplification" (rerunning intake from scratch, one redundant
     LLM call every message) -- redundant LLM calls are exactly what burns
     through Groq's free-tier rate limit fastest, so it stopped being a
     minor inefficiency and became a real reason a plan could fail outright.
 
-    Passing no intake_plan keeps the original four-task chain, for tests
+    Passing no intake_plan keeps the original five-task chain, for tests
     or any caller that doesn't already have a satisfied draft on hand.
 
     task_callback is Crew's own hook (confirmed via the installed crewai
@@ -414,16 +507,20 @@ def build_crew(
     to take the actual crew run down with it.
     """
     itinerary_agent = build_itinerary_agent()
+    food_agent = build_food_agent()
     consolidation_agent = build_consolidation_agent()
     presentation_agent = build_presentation_agent()
 
     if intake_plan is not None:
         itinerary_task = build_itinerary_task_from_plan(itinerary_agent, intake_plan)
-        consolidation_task = build_consolidation_task_from_plan(consolidation_agent, intake_plan, itinerary_task)
+        food_task = build_food_task_from_plan(food_agent, intake_plan)
+        consolidation_task = build_consolidation_task_from_plan(
+            consolidation_agent, intake_plan, itinerary_task, food_task
+        )
         presentation_task = build_presentation_task(presentation_agent, consolidation_task)
         return Crew(
-            agents=[itinerary_agent, consolidation_agent, presentation_agent],
-            tasks=[itinerary_task, consolidation_task, presentation_task],
+            agents=[itinerary_agent, food_agent, consolidation_agent, presentation_agent],
+            tasks=[itinerary_task, food_task, consolidation_task, presentation_task],
             process=Process.sequential,
             tracing=False,
             verbose=True,
@@ -433,12 +530,13 @@ def build_crew(
     intake_agent = build_intake_agent()
     intake_task = build_intake_task(intake_agent)
     itinerary_task = build_itinerary_task(itinerary_agent, intake_task)
-    consolidation_task = build_consolidation_task(consolidation_agent, intake_task, itinerary_task)
+    food_task = build_food_task(food_agent, intake_task)
+    consolidation_task = build_consolidation_task(consolidation_agent, intake_task, itinerary_task, food_task)
     presentation_task = build_presentation_task(presentation_agent, consolidation_task)
 
     return Crew(
-        agents=[intake_agent, itinerary_agent, consolidation_agent, presentation_agent],
-        tasks=[intake_task, itinerary_task, consolidation_task, presentation_task],
+        agents=[intake_agent, itinerary_agent, food_agent, consolidation_agent, presentation_agent],
+        tasks=[intake_task, itinerary_task, food_task, consolidation_task, presentation_task],
         process=Process.sequential,
         tracing=False,
         verbose=True,
@@ -449,7 +547,7 @@ def build_crew(
 def build_intake_crew() -> Crew:
     """A one-task crew running intake alone, for the clarification-gathering
     loop in app.py. Checking open_questions here is cheaper than running
-    the full four-agent pipeline just to find out something's missing.
+    the full five-agent pipeline just to find out something's missing.
 
     app.py passes this crew's result straight into build_crew(intake_plan=...)
     once open_questions comes back empty, so intake only ever runs once per

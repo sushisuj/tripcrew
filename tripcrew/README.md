@@ -1,36 +1,43 @@
 # tripcrew
 
 An AI agent that plans multi-day trips end-to-end. Understands a goal,
-decides which tools to call (flights, hotels, weather, attractions), and
-asks for missing info instead of guessing.
+decides which tools to call (flights, hotels, weather, attractions,
+restaurants), and asks for missing info instead of guessing.
 
 Give it something like "plan a 3-day trip to Paris" and it has to figure
 out what that actually requires: an origin city and dates it wasn't given,
 a sequence of tool calls it has to choose for itself, and a final plan that
-holds together (flights, a hotel, a few attractions, weather, and a budget
-that's actually the sum of what the tools returned, not a number an LLM
-made up). That loop, understand the goal, plan the steps, pick and use
-tools, check the results, answer, is the actual point of the project. A
-chatbot that already knows the steps isn't demonstrating it.
+holds together (flights, a hotel, a few attractions and restaurants,
+weather, and a budget that's actually the sum of what the tools returned,
+not a number an LLM made up). That loop, understand the goal, plan the
+steps, pick and use tools, check the results, answer, is the actual point
+of the project. A chatbot that already knows the steps isn't demonstrating
+it.
 
 ## Current state
 
-The planner works end to end on mocked flight and hotel data. Four agents,
-not the five originally sketched, food research is deferred until its tool
-exists (see `docs/architecture.rst`): an intake agent that asks for
-whatever's missing (origin city, dates, budget) before anything else runs,
-an itinerary agent that pulls real attractions and weather, a consolidator
-that builds the final plan and calls a real tool to compute the budget
-total instead of stating one itself, and a presenter that writes it up. `tripcrew/app.py` is a working
-Streamlit chat, not a skeleton, it runs a cheap intake-only check first and
-only kicks off the full crew once it has enough to work with.
+The planner works end to end on mocked flight and hotel data, with all
+five originally sketched agents wired in (see `docs/architecture.rst`): an
+intake agent that asks for whatever's missing (origin city, dates, budget)
+before anything else runs, an itinerary agent that pulls real attractions
+and weather, a food agent that pulls nearby restaurants and cafes, a
+consolidator that builds the final plan and calls a real tool to compute
+the budget total instead of stating one itself, and a presenter that
+writes it up. `tripcrew/app.py` is a working Streamlit chat, not a
+skeleton, it runs a cheap intake-only check first and only kicks off the
+full crew once it has enough to work with.
 
-Weather and attractions call real APIs (OpenWeatherMap, Geoapify).
-Flights and hotels are mocked on purpose, not by oversight, because the
-APIs with real live pricing gate access behind a business-partner approval
-process that doesn't clear on a reasonable timeline. See
-`docs/architecture.rst` for the full reasoning and what the realistic path
-forward looks like.
+Weather, attractions, and restaurants call real APIs (OpenWeatherMap,
+Geoapify). Restaurants reuse the same Geoapify integration attractions
+does, but without a notability filter, Geoapify doesn't carry a rating or
+popularity signal for restaurants any more than it does for attractions,
+and the filter that works for landmarks (a Wikipedia link) would filter
+out most restaurants worth listing. So it's a plain nearby-places search,
+not a curated one, and every write-up says so. Flights and hotels are
+mocked on purpose, not by oversight, because the APIs with real live
+pricing gate access behind a business-partner approval process that
+doesn't clear on a reasonable timeline. See `docs/architecture.rst` for
+the full reasoning and what the realistic path forward looks like.
 
 Once a trip is fully planned, the sidebar offers it as a downloadable PDF
 (`tripcrew/pdf_export.py`), built from the same consolidated `TripPlan`
@@ -52,8 +59,9 @@ The plan, in rough order:
    quietly counting it as free, and the consolidation agent now calls a
    real tool to compute the total instead of writing one itself. Full
    reasoning in `docs/architecture.rst`.
-2. The food research agent and its tool, once it's worth the second
-   Geoapify integration.
+2. The food research agent and its tool, done -- see
+   `tripcrew/tools/restaurants.py` and `tripcrew/agent.py`'s
+   `build_food_agent()`.
 3. PDF export of the finished itinerary, done -- see `tripcrew/pdf_export.py`.
 4. A follow-up chatbot that answers questions about the generated plan,
    done -- see `tripcrew/followup.py`. Classify-then-lookup, not RAG: one

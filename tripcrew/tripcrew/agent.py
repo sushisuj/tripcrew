@@ -204,7 +204,10 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
             "which don't. Both tools return an empty result rather than an "
             "error when they can't actually look something up -- treat an "
             "empty result as 'not available for this trip,' don't invent a "
-            "plausible-sounding attraction or forecast to fill the gap."
+            "plausible-sounding attraction or forecast to fill the gap. If a "
+            "weather report is marked approximate, say so plainly (the real "
+            "forecast for that day isn't out yet), don't present it as an "
+            "exact forecast."
         ),
         expected_output=(
             "A list of attractions with the weather context that informed "
@@ -282,7 +285,10 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
             "tools return an empty result rather than an error when they "
             "can't actually look something up -- treat an empty result as "
             "'not available for this trip,' don't invent a "
-            "plausible-sounding attraction or forecast to fill the gap."
+            "plausible-sounding attraction or forecast to fill the gap. If a "
+            "weather report is marked approximate, say so plainly (the real "
+            "forecast for that day isn't out yet), don't present it as an "
+            "exact forecast."
         ),
         expected_output=(
             "A list of attractions with the weather context that informed "
@@ -360,7 +366,9 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
             "plan, don't add details the plan doesn't contain. If "
             "budget.unpriced_categories isn't empty, say plainly that the "
             "total doesn't include those categories, don't present it as a "
-            "complete number."
+            "complete number. If any weather report has is_approximate set, "
+            "say plainly that day's forecast is an estimate, not a real "
+            "forecast for that date."
         ),
         expected_output=(
             "A readable trip plan write-up covering flights, hotel, "

@@ -84,6 +84,23 @@ def test_flight_missing_a_price_does_not_crash_the_cheapest_lookup():
     assert pdf_bytes.startswith(b"%PDF")
 
 
+def test_approximate_weather_is_marked_and_footnoted():
+    plan = TripPlan(
+        destination="Lisbon",
+        days=10,
+        weather=[
+            WeatherReport(city="Lisbon", date="2026-08-24", summary="light rain, 20C"),
+            WeatherReport(city="Lisbon", date="2026-09-02", summary="clear sky, 22C", is_approximate=True),
+        ],
+    )
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "(approximate)" in text
+    assert "5-day forecast window" in text
+
+
 def test_special_characters_in_agent_text_do_not_break_rendering():
     # write_up comes from an LLM, attraction names from a live API --
     # reportlab's Paragraph parser treats <, >, & as XML, so unescaped

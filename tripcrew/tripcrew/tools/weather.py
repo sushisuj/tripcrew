@@ -42,25 +42,29 @@ def _geocode(city: str) -> tuple[float, float]:
     return results[0]["lat"], results[0]["lon"]
 
 
-def _closest_forecast_entry(entries: list[dict], target_date: str) -> dict:
+def _closest_forecast_entry(entries: list[dict], target_date: str) -> tuple[dict, int]:
     """Picks the forecast entry whose date is closest to `target_date` (ISO,
     e.g. 2026-09-01), instead of always taking the first entry (roughly
     "now") regardless of which date was actually requested -- that mismatch
     is why every day of a trip was coming back with the identical forecast.
 
-    OpenWeatherMap's free tier only forecasts 5 days out, so a target_date
-    further out than that just means the closest available entry gets
-    used, still an approximation, not an exact match -- that limitation is
-    the separate, still-open TODO below, this function only fixes which
-    entry gets picked among the ones OpenWeatherMap actually returned.
+    Returns (entry, day_gap): day_gap is how many calendar days separate
+    the picked entry from target_date. 0 means OpenWeatherMap actually had
+    an entry for that exact day; anything higher means target_date fell
+    outside the 5-day window the free tier forecasts, and the caller
+    (get_weather) uses that to mark the result approximate instead of
+    quietly presenting a nearby day's forecast as if it were the real one.
     """
     target = datetime.fromisoformat(target_date).date()
-    return min(
+    closest = min(
         entries,
         key=lambda entry: abs(
             (datetime.strptime(entry["dt_txt"], "%Y-%m-%d %H:%M:%S").date() - target).days
         ),
     )
+    entry_date = datetime.strptime(closest["dt_txt"], "%Y-%m-%d %H:%M:%S").date()
+    day_gap = abs((entry_date - target).days)
+    return closest, day_gap
 
 
 @tool("Weather Lookup")
@@ -75,11 +79,12 @@ def get_weather(city: str, date: str) -> WeatherReport | None:
     run has to stop. The itinerary and presentation tasks are told to say so
     plainly rather than invent a forecast.
 
-    Note: OpenWeatherMap's free tier is a 5-day/3-hour forecast, not arbitrary
-    future dates -- this will need a fallback (seasonal averages, or just an
-    honest "forecast not available yet, here's typical weather for this month")
-    once dates are more than 5 days out. Not handled yet, still just a TODO
-    below, separate from the failure handling this function now does.
+    OpenWeatherMap's free tier is a 5-day/3-hour forecast, not arbitrary
+    future dates. A date further out than that still gets an answer, the
+    closest available entry, rather than nothing, but WeatherReport.is_approximate
+    is set so nothing downstream mistakes it for a real forecast of that
+    day. A seasonal-average fallback would be the fuller fix; this is the
+    honest version of the current one, not a replacement for it.
     """
     api_key = os.getenv("OPENWEATHER_API_KEY")
     if not api_key:
@@ -95,9 +100,9 @@ def get_weather(city: str, date: str) -> WeatherReport | None:
         response.raise_for_status()
         data = response.json()
 
-        entry = _closest_forecast_entry(data["list"], date)
+        entry, day_gap = _closest_forecast_entry(data["list"], date)
         summary = f"{entry['weather'][0]['description']}, {entry['main']['temp']}C"
     except (WeatherUnavailable, requests.RequestException, KeyError, IndexError, ValueError):
         return None
 
-    return WeatherReport(city=city, date=date, summary=summary)
+    return WeatherReport(city=city, date=date, summary=summary, is_approximate=day_gap > 0)

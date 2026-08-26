@@ -45,6 +45,14 @@ class WeatherReport(BaseModel):
     city: str
     date: str = Field(description="ISO date")
     summary: str = Field(description="Short human-readable forecast, e.g. 'light rain, 14C'")
+    is_approximate: bool = Field(
+        default=False,
+        description="True when this isn't a real forecast for `date` -- OpenWeatherMap's "
+        "free tier only forecasts 5 days out, so a date further than that gets the closest "
+        "available entry instead of an exact match. Exists so the write-up can say plainly "
+        "that a day's weather is approximate instead of presenting it as a real forecast, "
+        "same honesty rule as Budget.unpriced_categories applied to a date instead of a price.",
+    )
 
 
 class Budget(BaseModel):

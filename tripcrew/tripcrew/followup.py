@@ -118,11 +118,15 @@ def format_answer(trip_plan: TripPlan, intent: TripQuestionIntent) -> str:
         if intent.date:
             match = next((report for report in trip_plan.weather if report.date == intent.date), None)
             if match:
-                return f"Weather for {match.date}: {match.summary}."
+                note = " (approximate -- beyond the real forecast window)" if match.is_approximate else ""
+                return f"Weather for {match.date}: {match.summary}{note}."
             # The date didn't actually match one we have -- fall through to
             # the full list rather than claim a specific day has no data
             # when really the classifier just named a date wrong.
-        lines = [f"- {report.date}: {report.summary}" for report in trip_plan.weather]
+        lines = [
+            f"- {report.date}: {report.summary}" + (" (approximate)" if report.is_approximate else "")
+            for report in trip_plan.weather
+        ]
         return "Weather forecast:\n" + "\n".join(lines)
 
     if intent.category == "budget":

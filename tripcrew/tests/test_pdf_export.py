@@ -9,7 +9,7 @@ from pypdf import PdfReader
 from io import BytesIO
 
 from tripcrew.pdf_export import build_trip_pdf
-from tripcrew.schemas import Attraction, Budget, Flight, Hotel, TripPlan, WeatherReport
+from tripcrew.schemas import Attraction, Budget, Flight, Hotel, Restaurant, TripPlan, WeatherReport
 
 
 def _page_count(pdf_bytes: bytes) -> int:
@@ -99,6 +99,29 @@ def test_approximate_weather_is_marked_and_footnoted():
     text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
     assert "(approximate)" in text
     assert "5-day forecast window" in text
+
+
+def test_restaurants_are_listed_with_the_not_curated_note():
+    plan = TripPlan(
+        destination="Lisbon",
+        days=4,
+        restaurants=[Restaurant(name="Cervejaria Ramiro", city="Lisbon", category="catering.restaurant")],
+    )
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Cervejaria Ramiro" in text
+    assert "not a rated or curated list" in text
+
+
+def test_no_restaurants_renders_the_not_available_note_not_a_crash():
+    plan = TripPlan(destination="Lisbon", days=4)
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "No restaurants available" in text
 
 
 def test_special_characters_in_agent_text_do_not_break_rendering():

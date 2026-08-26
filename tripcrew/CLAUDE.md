@@ -73,6 +73,15 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   attractions reports a real but incomplete total with no flag. Tighten
   that on purpose if it ever needs it, don't "fix" it as a side effect of
   touching something else.
+- An approximate forecast is not a real one. `get_weather()` still returns
+  the closest available entry for a date beyond OpenWeatherMap's 5-day free
+  tier window, same as before, but `WeatherReport.is_approximate` now says
+  when that happened. The itinerary, presentation, follow-up (`followup.py`),
+  and PDF (`pdf_export.py`) code paths all check it and say "approximate"
+  rather than presenting a nearby day's forecast as if it were the real one
+  for that date. This isn't the seasonal-average fallback `weather.py` still
+  mentions as the fuller fix, it's the honest version of the current
+  approximation, not a replacement for it.
 - `estimate_budget` is a real `@tool` now, and `consolidation_agent` has it
   as its one tool. This closed the gap where the LLM used to write
   `Budget.total_usd` itself as part of its own structured output, the exact

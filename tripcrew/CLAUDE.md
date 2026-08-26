@@ -55,6 +55,15 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   unknown, it goes in `unpriced_categories`, not folded into the total as
   zero, and the presentation task has to say so rather than show a total
   that looks complete.
+- A category match is not notability. `get_attractions()`'s Places request
+  used to filter on category alone, which is how a Lisbon trip came back
+  with a minor spot in Trafaria, a separate town across the river, since
+  Geoapify's circle search doesn't respect municipality boundaries. It now
+  requests with Geoapify's `wiki_and_media` condition first (a real
+  Wikipedia/Wikidata link, not just a category tag) and only falls back to
+  the unfiltered search if that comes back empty, which happens for
+  smaller destinations with thin Wikipedia coverage. Don't drop the
+  notable-first request to "simplify" this, that's the actual fix.
 - `estimate_budget` is a real `@tool` now, and `consolidation_agent` has it
   as its one tool. This closed the gap where the LLM used to write
   `Budget.total_usd` itself as part of its own structured output, the exact

@@ -41,6 +41,21 @@ class Attraction(BaseModel):
     estimated_cost_usd: Optional[float] = Field(default=None)
 
 
+class Restaurant(BaseModel):
+    name: str
+    city: str
+    category: Optional[str] = Field(
+        default=None, description="e.g. catering.restaurant, catering.cafe, catering.fast_food"
+    )
+    estimated_cost_usd: Optional[float] = Field(
+        default=None,
+        description="Geoapify's Places API doesn't return price data for catering places "
+        "any more than it does for attractions, so this is always None from get_restaurants "
+        "right now. Kept as a real field, not omitted, so a future source that does carry "
+        "pricing doesn't need a schema change to use it.",
+    )
+
+
 class WeatherReport(BaseModel):
     city: str
     date: str = Field(description="ISO date")
@@ -59,13 +74,14 @@ class Budget(BaseModel):
     flights_usd: float = 0
     hotel_usd: float = 0
     attractions_usd: float = 0
+    restaurants_usd: float = 0
     total_usd: float = 0
     unpriced_categories: list[str] = Field(
         default_factory=list,
         description="Categories left out of total_usd because no price data was "
-        "available for them (e.g. Geoapify never returns attraction costs). "
-        "Exists so a total that excludes something is never presented as if it "
-        "were complete -- same honesty rule as the source field on Flight and "
+        "available for them (e.g. Geoapify never returns attraction or restaurant "
+        "costs). Exists so a total that excludes something is never presented as if "
+        "it were complete -- same honesty rule as the source field on Flight and "
         "Hotel, applied to what got silently treated as free instead of unknown.",
     )
 
@@ -76,7 +92,7 @@ class Budget(BaseModel):
         should have taught us to always add: don't let the agent state a total,
         derive it.
         """
-        self.total_usd = self.flights_usd + self.hotel_usd + self.attractions_usd
+        self.total_usd = self.flights_usd + self.hotel_usd + self.attractions_usd + self.restaurants_usd
         return self
 
 
@@ -86,6 +102,7 @@ class TripPlan(BaseModel):
     flights: list[Flight] = Field(default_factory=list)
     hotel: Optional[Hotel] = None
     attractions: list[Attraction] = Field(default_factory=list)
+    restaurants: list[Restaurant] = Field(default_factory=list)
     weather: list[WeatherReport] = Field(default_factory=list)
     budget: Budget = Field(default_factory=Budget)
     open_questions: list[str] = Field(
@@ -105,7 +122,7 @@ class TripQuestionIntent(BaseModel):
     can never contain a fact, only a pointer to where a fact already is.
     """
 
-    category: Literal["flights", "hotel", "attractions", "weather", "budget", "unclear"] = Field(
+    category: Literal["flights", "hotel", "attractions", "restaurants", "weather", "budget", "unclear"] = Field(
         description="Which part of the trip plan the question is about. 'unclear' if none fit."
     )
     date: Optional[str] = Field(

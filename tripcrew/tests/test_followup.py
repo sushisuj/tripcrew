@@ -14,6 +14,7 @@ from tripcrew.schemas import (
     Budget,
     Flight,
     Hotel,
+    Restaurant,
     TripPlan,
     TripQuestionIntent,
     WeatherReport,
@@ -65,6 +66,27 @@ def test_attractions_question_lists_names_and_categories():
     answer = format_answer(plan, TripQuestionIntent(category="attractions"))
     assert "Belem Tower" in answer
     assert "tourism.sights" in answer
+
+
+def test_restaurants_question_lists_names_and_categories():
+    plan = _trip_plan(restaurants=[Restaurant(name="Cervejaria Ramiro", city="Lisbon", category="catering.restaurant")])
+    answer = format_answer(plan, TripQuestionIntent(category="restaurants"))
+    assert "Cervejaria Ramiro" in answer
+    assert "catering.restaurant" in answer
+
+
+def test_restaurants_question_says_plainly_this_is_not_a_rated_list():
+    # The whole point of restaurants.py's own honesty note: don't let the
+    # answer imply curation or ratings the tool never provided.
+    plan = _trip_plan(restaurants=[Restaurant(name="Cervejaria Ramiro", city="Lisbon")])
+    answer = format_answer(plan, TripQuestionIntent(category="restaurants"))
+    assert "not a rated or curated list" in answer.lower()
+
+
+def test_restaurants_question_with_no_restaurants_says_so_plainly():
+    plan = _trip_plan()
+    answer = format_answer(plan, TripQuestionIntent(category="restaurants"))
+    assert "No restaurants are available" in answer
 
 
 def test_weather_question_for_a_specific_date_returns_only_that_day():

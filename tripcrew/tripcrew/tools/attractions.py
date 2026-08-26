@@ -29,6 +29,16 @@ ATTRACTION_CATEGORIES = "tourism.attraction,tourism.sights,entertainment.museum,
 # OpenTripMap integration used.
 SEARCH_RADIUS_METERS = 10000
 
+# Geoapify condition restricting results to POIs that carry a Wikipedia or
+# Wikidata link -- the actual notability signal. A category match alone
+# isn't one: Geoapify's circle search doesn't respect municipality
+# boundaries, so "tourism.sights within 10km of Lisbon" can just as easily
+# surface a minor, unremarkable spot in Trafaria (a separate town across
+# the river) as a landmark in Lisbon itself. That's the real bug this
+# fixes, not a hypothetical -- it's what came back on the Lisbon run this
+# filter was built to address.
+NOTABILITY_CONDITION = "wiki_and_media"
+
 
 class AttractionsUnavailable(Exception):
     """Raised for any condition that means attractions can't be looked up
@@ -51,10 +61,9 @@ def _geocode(city: str, api_key: str) -> tuple[float, float]:
         raise AttractionsUnavailable(f"Geocoding request failed for {city}: {e}") from e
 
 
-def _fetch_places(lat: float, lon: float, api_key: str, limit: int) -> list[dict]:
-    """One Places API call. Split out from get_attractions so the notability
-    filter (added next) can call it twice -- once restricted to notable
-    POIs, once as an unfiltered fallback -- without duplicating the
+def _fetch_places(lat: float, lon: float, api_key: str, limit: int, notable_only: bool) -> list[dict]:
+    """One Places API call. Split out so get_attractions can call it twice
+    (notable-only, then an unfiltered fallback) without duplicating the
     request-building logic between the two.
     """
     params = {
@@ -63,6 +72,8 @@ def _fetch_places(lat: float, lon: float, api_key: str, limit: int) -> list[dict
         "limit": limit,
         "apiKey": api_key,
     }
+    if notable_only:
+        params["conditions"] = NOTABILITY_CONDITION
     response = requests.get(GEOAPIFY_PLACES, params=params, timeout=10)
     response.raise_for_status()
     # Places API returns a GeoJSON FeatureCollection, not a flat list --
@@ -79,6 +90,14 @@ def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
     guessed -- the budget tool should treat missing attraction costs as
     "unknown," not zero.
 
+    Notability filter: the primary request restricts results to POIs that
+    carry a Wikipedia/Wikidata link (see NOTABILITY_CONDITION above), so a
+    category match alone doesn't count as "worth visiting" -- that's what
+    used to let a wrong-municipality result through. Smaller destinations
+    can have thin Wikipedia coverage, so if that comes back empty, this
+    falls back to an unfiltered category search rather than reporting zero
+    attractions for a real city. Quality-first, not quality-only.
+
     Returns an empty list if a real lookup can't be produced right now
     (missing API key, geocoding failure, Places request failure). Same
     reasoning as get_weather returning None: an empty list already means
@@ -91,7 +110,9 @@ def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
 
     try:
         lat, lon = _geocode(city, api_key)
-        features = _fetch_places(lat, lon, api_key, limit)
+        features = _fetch_places(lat, lon, api_key, limit, notable_only=True)
+        if not features:
+            features = _fetch_places(lat, lon, api_key, limit, notable_only=False)
     except (AttractionsUnavailable, requests.RequestException, KeyError):
         return []
 

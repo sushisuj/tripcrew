@@ -22,12 +22,12 @@ loop (asking for missing origin city, dates, or budget) plus flights and
 hotels, since nothing else can usefully run until logistics are settled.
 An itinerary research agent that owns attractions and weather, since
 weather should influence how attractions get sequenced across days. A food
-research agent, covered below. A consolidation agent that merges
-everything into ``TripPlan``, and calls the Budget Estimator tool
-(``estimate_budget()``) to get ``Budget.total_usd`` rather than stating one
-itself, see "Error handling for tool failures" below for how that came to
-be its one tool. A presentation agent that formats the finished plan for
-the user.
+research agent that owns restaurants and cafes, covered below. A
+consolidation agent that merges everything into ``TripPlan``, and calls
+the Budget Estimator tool (``estimate_budget()``) to get
+``Budget.total_usd`` rather than stating one itself, see "Error handling
+for tool failures" below for how that came to be its one tool. A
+presentation agent that formats the finished plan for the user.
 
 Sequential over hierarchical on purpose: CrewAI also offers
 ``Process.hierarchical``, where a manager agent dynamically delegates to
@@ -48,7 +48,7 @@ resulting ``TripPlan``'s ``open_questions``. If it's non-empty,
 ``app.py`` shows those questions and waits for the next chat message,
 accumulating the whole conversation into a single growing string passed
 back in as ``{request}`` next time. Once ``open_questions`` comes back
-empty, ``app.py`` calls ``build_crew()`` and runs the real four-agent
+empty, ``app.py`` calls ``build_crew()`` and runs the real five-agent
 pipeline.
 
 This works because Streamlit already reruns the whole script on every
@@ -60,16 +60,40 @@ again from scratch rather than reusing the already-satisfied draft, one
 redundant LLM call per plan, not a correctness problem, just not the most
 efficient shape. Worth revisiting if it turns out to matter.
 
-Food research is deferred
-----------------------------
+Food research
+----------------
 
-The food/restaurant research agent is part of the design but not wired
-into the crew yet. It depends on a food-search tool that hasn't been
-built. The plan is to reuse Geoapify's ``categories`` filter, same API key
-and same pattern as ``tripcrew/tools/attractions.py``, just filtered to
-restaurants and cafes instead of landmarks, so it's a small addition when
-it happens, not a new integration. Until then the crew runs with four
-roles, not five.
+Built and wired in. ``tripcrew/tools/restaurants.py`` reuses Geoapify's
+``categories`` filter, same API key and same request/response shape as
+``tripcrew/tools/attractions.py``, filtered to ``catering.restaurant``,
+``catering.cafe``, and ``catering.fast_food`` instead of landmark
+categories -- confirmed against Geoapify's own docs before building it,
+same as the original attractions integration was.
+
+One real design difference from attractions, not an oversight: there's no
+notability filter here. ``get_attractions()`` restricts its first request
+to Geoapify's ``wiki_and_media`` condition, a real Wikipedia/Wikidata link,
+because a genuine landmark usually has one. A good neighborhood restaurant
+almost never does, and Geoapify's Places API doesn't carry a rating,
+popularity, or price-level field for catering places any more than it does
+for attractions, checked directly against the response shape before
+deciding this. Applying ``wiki_and_media`` here would come back near-empty
+for exactly the places worth listing and just fall through to an
+unfiltered search anyway, defeating the point of having it. So
+``get_restaurants()`` makes a single category-filtered request and returns
+what's nearby, and every downstream consumer, the food task's own
+description, the presentation task, ``followup.py``, ``pdf_export.py``,
+says plainly that this is a nearby-places list, not a rated or curated
+one. If real curation matters later, that's a fresh evaluation against
+something with actual ratings (Foursquare's paid tier, say), not a filter
+bolted onto Geoapify.
+
+``estimate_budget()`` takes ``restaurants`` as a required argument now,
+same shape as flights/hotel/attractions, and ``Budget`` has a
+``restaurants_usd`` field. Geoapify doesn't return cost data for catering
+places any more than it does for attractions, so a real run flags
+``"restaurants"`` in ``unpriced_categories`` every time, same honest gap
+attractions already has.
 
 Why flights and hotels are mocked
 ------------------------------------
@@ -199,4 +223,7 @@ follow.
 Not yet designed
 -------------------
 
-- The food research agent and its tool, deferred as described above
+- promptfoo and deepeval evaluation suites (see
+  ``evaluation/README.md`` for the intended split between them). Nothing
+  else is currently deferred, the five-role crew described above is fully
+  built and wired in.

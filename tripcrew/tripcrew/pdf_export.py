@@ -134,8 +134,21 @@ def build_trip_pdf(trip_plan: TripPlan, write_up: str) -> bytes:
     if trip_plan.weather:
         rows = [["Date", "Forecast"]]
         for report in trip_plan.weather:
-            rows.append([report.date, report.summary])
+            forecast = report.summary + (" (approximate)" if report.is_approximate else "")
+            rows.append([report.date, forecast])
         story.append(_table(rows, col_widths=[1.5 * inch, 5 * inch]))
+        if any(report.is_approximate for report in trip_plan.weather):
+            story.append(Spacer(1, 6))
+            story.append(
+                Paragraph(
+                    escape(
+                        "Note: dates marked (approximate) are outside OpenWeatherMap's "
+                        "5-day forecast window, so this is the closest available "
+                        "forecast, not a real one for that date."
+                    ),
+                    _STYLES["Italic"],
+                )
+            )
     else:
         story.append(Paragraph("No weather forecast available for this trip.", _STYLES["Normal"]))
     story.append(Spacer(1, 10))

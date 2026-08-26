@@ -89,6 +89,18 @@ def test_weather_question_with_unmatched_date_falls_back_to_full_forecast():
     assert "Light rain" in answer
 
 
+def test_weather_question_for_an_approximate_day_says_so():
+    plan = _trip_plan(
+        weather=[
+            WeatherReport(city="Lisbon", date="2026-08-24", summary="Light rain, 20C"),
+            WeatherReport(city="Lisbon", date="2026-09-01", summary="Broken clouds, 20C", is_approximate=True),
+        ]
+    )
+    answer = format_answer(plan, TripQuestionIntent(category="weather", date="2026-09-01"))
+    assert "Broken clouds" in answer
+    assert "approximate" in answer.lower()
+
+
 def test_weather_question_with_no_date_returns_full_forecast():
     plan = _trip_plan(
         weather=[

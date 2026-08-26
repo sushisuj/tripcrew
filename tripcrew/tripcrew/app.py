@@ -206,7 +206,7 @@ def render_sidebar() -> None:
 
 st.title("tripcrew")
 if st.session_state.trip_write_up:
-    st.caption("Trip's planned. Ask about flights, hotel, attractions, weather, or budget, or start over.")
+    st.caption("Trip's planned. Ask about flights, hotel, attractions, restaurants, weather, or budget, or start over.")
 else:
     st.caption("Tell it where you want to go. It'll ask if it needs more.")
 
@@ -246,18 +246,26 @@ if prompt:
                 st.write(response)
             else:
                 # A live step indicator, not just a spinner. build_crew(intake_plan=...)
-                # runs itinerary research, consolidation, and presentation in that
-                # fixed order (Process.sequential), so task_callback firing once
-                # per completed task can be counted against STAGE_LABELS below to
-                # know which stage just finished -- CrewAI's own hook (confirmed
-                # in its source: crew_task_callback fires as task.callback(task.output)
+                # runs itinerary research, food research, consolidation, and
+                # presentation in that fixed order (Process.sequential), so
+                # task_callback firing once per completed task can be counted
+                # against STAGE_LABELS below to know which stage just finished
+                # -- CrewAI's own hook (confirmed in its source:
+                # crew_task_callback fires as task.callback(task.output)
                 # right after each task completes), nothing bolted on. kickoff()
                 # is a normal blocking call, so this callback runs synchronously
                 # from inside it; calling .write() on the status object we already
                 # hold updates the same widget immediately, no rerun needed, the
                 # same mechanism st.progress() and st.status() are built for.
+                #
+                # Four entries, matching build_crew(intake_plan=...)'s four
+                # tasks exactly -- this list has to track that task count, or
+                # a stage silently stops showing (see mark_stage_done's own
+                # `i < len(STAGE_LABELS)` guard) and the real last task's
+                # completion never gets its checkmark.
                 STAGE_LABELS = [
                     "Researching attractions & weather",
+                    "Researching restaurants & cafes",
                     "Consolidating the plan & budget",
                     "Writing it up",
                 ]

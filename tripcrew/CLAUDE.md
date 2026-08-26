@@ -64,6 +64,15 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   the unfiltered search if that comes back empty, which happens for
   smaller destinations with thin Wikipedia coverage. Don't drop the
   notable-first request to "simplify" this, that's the actual fix.
+- `estimate_budget()` and the weather date-matching logic
+  (`_closest_forecast_entry()`) both have real test coverage now
+  (`tests/test_budget.py`, `tests/test_weather.py`), mocking `requests.get`
+  the same way `test_attractions.py` does. One behavior the budget tests
+  document rather than fix: `unpriced_categories` only flags a category
+  when *none* of its items have a price, so a mix of priced and unpriced
+  attractions reports a real but incomplete total with no flag. Tighten
+  that on purpose if it ever needs it, don't "fix" it as a side effect of
+  touching something else.
 - `estimate_budget` is a real `@tool` now, and `consolidation_agent` has it
   as its one tool. This closed the gap where the LLM used to write
   `Budget.total_usd` itself as part of its own structured output, the exact

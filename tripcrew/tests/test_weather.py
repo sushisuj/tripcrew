@@ -40,26 +40,29 @@ def test_closest_forecast_entry_picks_the_matching_date_not_the_first_one():
         _entry("2026-08-25 12:00:00", description="broken clouds"),
         _entry("2026-08-26 12:00:00", description="clear sky"),
     ]
-    picked = _closest_forecast_entry(entries, "2026-08-26")
+    picked, day_gap = _closest_forecast_entry(entries, "2026-08-26")
     assert picked["weather"][0]["description"] == "clear sky"
+    assert day_gap == 0
 
 
 def test_closest_forecast_entry_falls_back_to_nearest_when_no_exact_match():
     # OpenWeatherMap's free tier only forecasts 5 days out, so a target
-    # further than that has no exact entry -- this is the approximation
-    # the still-open 5-day TODO in weather.py refers to.
+    # further than that has no exact entry -- day_gap is what tells the
+    # caller this is an approximation, not a real forecast for that date.
     entries = [
         _entry("2026-08-24 12:00:00", description="light rain"),
         _entry("2026-08-27 12:00:00", description="broken clouds"),
     ]
-    picked = _closest_forecast_entry(entries, "2026-08-29")
+    picked, day_gap = _closest_forecast_entry(entries, "2026-08-29")
     assert picked["weather"][0]["description"] == "broken clouds"
+    assert day_gap == 2
 
 
 def test_closest_forecast_entry_uses_calendar_date_not_time_of_day():
     entries = [_entry("2026-08-24 03:00:00", description="light rain")]
-    picked = _closest_forecast_entry(entries, "2026-08-24")
+    picked, day_gap = _closest_forecast_entry(entries, "2026-08-24")
     assert picked["weather"][0]["description"] == "light rain"
+    assert day_gap == 0
 
 
 @patch.dict(os.environ, {}, clear=True)
@@ -85,6 +88,26 @@ def test_get_weather_returns_the_report_for_the_matching_day():
     assert result.date == "2026-08-25"
     assert "broken clouds" in result.summary
     assert "21.0" in result.summary
+    assert result.is_approximate is False
+
+
+@patch.dict(os.environ, {"OPENWEATHER_API_KEY": "test-key"})
+def test_get_weather_flags_a_date_outside_the_forecast_window_as_approximate():
+    # The actual fix: a date beyond what OpenWeatherMap's free tier covers
+    # used to come back looking identical to a real forecast for that day.
+    with patch("tripcrew.tools.weather.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _geocode_response(),
+            _forecast_response([
+                _entry("2026-08-24 12:00:00", description="light rain", temp=18.5),
+                _entry("2026-08-25 12:00:00", description="broken clouds", temp=21.0),
+            ]),
+        ]
+        result = get_weather.func(city="Lisbon", date="2026-09-01")
+
+    assert result.is_approximate is True
+    # Still returns the closest available forecast, not nothing.
+    assert "broken clouds" in result.summary
 
 
 @patch.dict(os.environ, {"OPENWEATHER_API_KEY": "test-key"})

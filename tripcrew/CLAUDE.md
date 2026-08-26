@@ -116,6 +116,35 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   that's the one thing that would turn this from "graph traversal" back
   into the RAG pipeline the design explicitly avoids. `format_answer()`
   (plain Python) is the only thing allowed to produce the text a user sees.
+- A category match is not curation, restaurant edition. `get_restaurants()`
+  reuses the same Geoapify Places API and API key as `get_attractions()`,
+  filtered to `catering.restaurant`, `catering.cafe`, and
+  `catering.fast_food`, but it does not apply a notability condition the
+  way attractions does. Checked directly against Geoapify's docs before
+  building this: a place's properties carry name, address, categories,
+  distance, and place_id, nothing Geoapify itself computes as a rating,
+  popularity, or price-level signal, and `wiki_and_media` would come back
+  near-empty for exactly the restaurants worth listing, a genuinely good
+  neighborhood spot almost never has a Wikipedia page the way a landmark
+  does. So `get_restaurants()` is a plain nearby-places search, and every
+  place that presents it (the food task, the presentation task,
+  `followup.py`, `pdf_export.py`) says so rather than implying curation
+  that isn't there. If real curation ever matters, that's a new evaluation
+  against something like Foursquare's ratings-bearing tier, not a filter
+  to bolt onto this tool.
+- `estimate_budget()` takes `restaurants` as a required argument alongside
+  flights, hotel, and attractions, and `Budget` has a `restaurants_usd`
+  field. Same unpriced-category handling as attractions: Geoapify doesn't
+  return cost data for catering places either, so a real run always flags
+  `"restaurants"` in `unpriced_categories` right now, not a bug, the
+  honest state of the data.
+- `app.py`'s `STAGE_LABELS` list has to have exactly as many entries as
+  `build_crew(intake_plan=...)` has tasks, since `task_callback` fires once
+  per completed task and counts against that list by index. Adding a role
+  to the crew (food research did this) without adding its label here means
+  the last real stage silently stops showing a checkmark, `mark_stage_done`
+  swallows the resulting index-out-of-range case on purpose, so this fails
+  quiet, not loud, if forgotten.
 
 ## Architecture note: multi-agent, not single-agent
 
@@ -123,8 +152,10 @@ The agent layer was originally a single agent with four tools. That's
 been superseded. The actual design is a five-role crew under
 `Process.sequential` (intake/coordinator, itinerary research, food
 research, consolidation, presentation), described in full in
-`docs/architecture.rst`. Don't rebuild the single-agent version, and don't
-assume `tripcrew/agent.py` still matches this file's own earlier
+`docs/architecture.rst`. All five roles are wired into `build_crew()` now,
+including food research (`build_food_agent()`, `build_food_task()`/
+`build_food_task_from_plan()`). Don't rebuild the single-agent version, and
+don't assume `tripcrew/agent.py` still matches this file's own earlier
 description of it, check the current code and `docs/architecture.rst`
 directly.
 
@@ -137,9 +168,5 @@ reasoning in `docs/architecture.rst`'s "Clarification loop" section.
 
 ## Not built yet (don't assume these exist)
 
-- The five-agent crew itself. Currently four roles are working, food
-  research is deferred until its tool exists.
-- The food/restaurant search tool (planned: Geoapify, same pattern as
-  `attractions.py`, different `categories` filter).
 - promptfoo and deepeval test suites (see `evaluation/README.md` for the
   intended split between them).

@@ -19,9 +19,10 @@ from typing import Callable
 
 import crewai.llms.cache as _crewai_cache
 from crewai import LLM, Agent, Crew, Process, Task
+from crewai.crews.crew_output import CrewOutput
 from crewai.tasks.task_output import TaskOutput
 
-from tripcrew.schemas import TripPlan
+from tripcrew.schemas import FoodResearch, ItineraryResearch, TripPlan
 from tripcrew.tools.attractions import get_attractions
 from tripcrew.tools.budget import estimate_budget
 from tripcrew.tools.flights import search_flights
@@ -222,7 +223,16 @@ def build_intake_task(agent: Agent) -> Task:
 
 
 def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
-    """Depends on intake_task's output for destination and dates."""
+    """Depends on intake_task's output for destination and dates.
+
+    output_pydantic=ItineraryResearch (not left as free text) so
+    get_attractions()'s and get_weather()'s real return values survive
+    intact to assemble_trip_plan(), instead of only existing as prose the
+    consolidation task's LLM has to re-read and restate into its own
+    TripPlan.attractions/weather -- that restating step is where a real
+    London run picked up a corrupted weather summary. See
+    ItineraryResearch's own docstring in schemas.py.
+    """
     return Task(
         description=(
             "Using the destination and dates from the intake research, find "
@@ -234,16 +244,18 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
             "plausible-sounding attraction or forecast to fill the gap. If a "
             "weather report is marked approximate, say so plainly (the real "
             "forecast for that day isn't out yet), don't present it as an "
-            "exact forecast."
+            "exact forecast. Report the attractions and weather exactly as "
+            "the tools returned them -- don't reword or summarize a weather "
+            "summary string, copy it as given."
         ),
         expected_output=(
-            "A list of attractions with the weather context that informed "
-            "how they'd be sequenced across the trip's days, or a plain note "
-            "that attractions and/or weather weren't available if the tools "
-            "came back empty."
+            "The attractions and weather forecast the tools actually "
+            "returned, as structured data, empty lists where a tool came "
+            "back empty rather than an invented substitute."
         ),
         agent=agent,
         context=[intake_task],
+        output_pydantic=ItineraryResearch,
     )
 
 
@@ -258,6 +270,9 @@ def _trip_date_range(intake_plan: TripPlan) -> str:
     real date in the description, the itinerary/weather agent was free to
     invent one, which is how a Lisbon trip in November came back with
     weather dated the following January.
+
+    Also see build_itinerary_task's own docstring for why this task uses
+    output_pydantic=ItineraryResearch rather than free text.
     """
     start_str = None
     if intake_plan.flights and intake_plan.flights[0].departure_date:
@@ -298,6 +313,8 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     months off from the actual trip. Fixed here rather than in
     get_weather() itself, since the tool has no way to know what date it
     *should* have been called with, only what it was given.
+
+    output_pydantic=ItineraryResearch, same reasoning as build_itinerary_task.
     """
     date_range = _trip_date_range(intake_plan)
     return Task(
@@ -315,15 +332,17 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
             "plausible-sounding attraction or forecast to fill the gap. If a "
             "weather report is marked approximate, say so plainly (the real "
             "forecast for that day isn't out yet), don't present it as an "
-            "exact forecast."
+            "exact forecast. Report the attractions and weather exactly as "
+            "the tools returned them -- don't reword or summarize a weather "
+            "summary string, copy it as given."
         ),
         expected_output=(
-            "A list of attractions with the weather context that informed "
-            "how they'd be sequenced across the trip's days, or a plain note "
-            "that attractions and/or weather weren't available if the tools "
-            "came back empty."
+            "The attractions and weather forecast the tools actually "
+            "returned, as structured data, empty lists where a tool came "
+            "back empty rather than an invented substitute."
         ),
         agent=agent,
+        output_pydantic=ItineraryResearch,
     )
 
 
@@ -332,6 +351,11 @@ def build_food_task(agent: Agent, intake_task: Task) -> Task:
     build_itinerary_task -- food research doesn't need attractions or
     weather, just destination and dates, so it chains from intake directly
     rather than from the itinerary task.
+
+    output_pydantic=FoodResearch for the same reason build_itinerary_task
+    has output_pydantic=ItineraryResearch: get_restaurants()'s real return
+    value should survive to assemble_trip_plan() untouched, not get
+    re-authored by the consolidation task's LLM.
     """
     return Task(
         description=(
@@ -347,12 +371,13 @@ def build_food_task(agent: Agent, intake_task: Task) -> Task:
             "fill the gap."
         ),
         expected_output=(
-            "A list of restaurants and cafes near the destination, or a "
-            "plain note that none were available if the tool came back "
-            "empty."
+            "The restaurants and cafes the tool actually returned, as "
+            "structured data, an empty list rather than an invented "
+            "substitute if the tool came back empty."
         ),
         agent=agent,
         context=[intake_task],
+        output_pydantic=FoodResearch,
     )
 
 
@@ -361,6 +386,8 @@ def build_food_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     separately (build_intake_crew(), see app.py's two-phase flow). Same
     date-baking approach as build_itinerary_task_from_plan and for the same
     reason: there's no intake_task in this crew to chain context from.
+
+    output_pydantic=FoodResearch, same reasoning as build_food_task.
     """
     date_range = _trip_date_range(intake_plan)
     return Task(
@@ -378,18 +405,31 @@ def build_food_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
             "don't invent a plausible-sounding restaurant to fill the gap."
         ),
         expected_output=(
-            "A list of restaurants and cafes near the destination, or a "
-            "plain note that none were available if the tool came back "
-            "empty."
+            "The restaurants and cafes the tool actually returned, as "
+            "structured data, an empty list rather than an invented "
+            "substitute if the tool came back empty."
         ),
         agent=agent,
+        output_pydantic=FoodResearch,
     )
 
 
 def build_consolidation_task(agent: Agent, intake_task: Task, itinerary_task: Task, food_task: Task) -> Task:
-    """Depends on all three prior research tasks. Only task with a pydantic
-    output type -- this is the point where a TripPlan actually exists as
-    structured data.
+    """Depends on all three prior research tasks. Not the only task with a
+    pydantic output type any more (itinerary_task and food_task now have
+    their own, see build_itinerary_task and build_food_task), but still the
+    one place a full TripPlan actually gets assembled.
+
+    This task's own attractions/weather/restaurants fields are not the
+    fields that end up in the final plan: assemble_trip_plan() overwrites
+    them with itinerary_task's and food_task's own structured output right
+    after kickoff, since this agent restating a list it already has in
+    context is exactly the kind of re-authoring that corrupted a weather
+    summary in a real run (see ItineraryResearch's docstring in
+    schemas.py). Left un-penalized here on purpose rather than telling the
+    agent to skip those fields entirely: an empty attractions list would
+    make expected_output harder to satisfy for no benefit, since the real
+    values get substituted in regardless of what this task writes.
     """
     return Task(
         description=(
@@ -424,6 +464,11 @@ def build_consolidation_task_from_plan(
     kickoff) only substitutes bare {identifier} placeholders, confirmed by
     reading its source, so the embedded JSON's own braces don't collide
     with it.
+
+    Same caveat as build_consolidation_task: this task's own
+    attractions/weather/restaurants output gets overwritten by
+    assemble_trip_plan() using itinerary_task's and food_task's real
+    structured output, not trusted as-is.
     """
     intake_json = intake_plan.model_dump_json(indent=2)
     return Task(
@@ -562,3 +607,57 @@ def build_intake_crew() -> Crew:
         tracing=False,
         verbose=True,
     )
+
+
+def assemble_trip_plan(result: CrewOutput) -> TripPlan | None:
+    """Pulls the real consolidated TripPlan out of a finished build_crew()
+    result, then overwrites its attractions, weather, and restaurants with
+    itinerary_task's and food_task's own structured output, verbatim.
+
+    Why this exists: the consolidation task's output_pydantic=TripPlan asks
+    its LLM to restate attractions/weather/restaurants as part of authoring
+    the whole plan, not just copy them, and an LLM restating a value it
+    already has in context is the same failure CLAUDE.md already warns
+    about for a Budget.total_usd, just applied to a list of text fields
+    instead of a number. Confirmed as a real bug, not a theoretical one: a
+    real London PDF came back with the weather summary "Light rain, ~22C
+    (approximate) (approximate)", a corruption that only appears in the
+    consolidation task's own retelling, get_weather()'s actual tool output
+    is clean. itinerary_task and food_task now carry ItineraryResearch and
+    FoodResearch as their own output_pydantic (see build_itinerary_task and
+    build_food_task), so their pydantic output is the one place those three
+    fields are guaranteed to match what the tools actually returned. This
+    function is where that guarantee actually gets applied, callers
+    (app.py) should use this instead of reading the consolidation task's
+    TripPlan directly.
+
+    Finds each task's output by isinstance rather than a fixed list index,
+    same reasoning as app.py's own comment on the code this replaces: it
+    shouldn't silently break if build_crew()'s task order or count changes.
+    Returns None if no TripPlan is found at all, which shouldn't happen in
+    normal operation but stays defensive rather than raising, matching the
+    prior inline check this replaces.
+    """
+    consolidated_plan = next(
+        (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
+        None,
+    )
+    if consolidated_plan is None:
+        return None
+
+    itinerary_research = next(
+        (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, ItineraryResearch)),
+        None,
+    )
+    if itinerary_research is not None:
+        consolidated_plan.attractions = itinerary_research.attractions
+        consolidated_plan.weather = itinerary_research.weather
+
+    food_research = next(
+        (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, FoodResearch)),
+        None,
+    )
+    if food_research is not None:
+        consolidated_plan.restaurants = food_research.restaurants
+
+    return consolidated_plan

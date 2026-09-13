@@ -160,6 +160,47 @@ dict. ``estimate_budget()`` now coerces its inputs with
 ``Model.model_validate(...)`` at the top instead of assuming the type hints
 are enforced automatically.
 
+Consolidation can't be trusted to restate research output
+--------------------------------------------------------------
+
+``Budget.total_usd`` wasn't the only value the consolidation task's LLM was
+trusted to restate rather than copy. ``output_pydantic=TripPlan`` on that
+task means its LLM authors the *whole* plan, including
+``attractions``, ``weather``, and ``restaurants``, from the itinerary and
+food tasks' context, not by mechanically forwarding those tasks' own
+output. A real London run showed exactly what that risks: the weather
+table came back with the summary "Light rain, ~22C (approximate)
+(approximate)", a corrupted duplicate that ``get_weather()`` itself never
+produces (confirmed by reading its actual return value, a plain
+``f"{description}, {temp}C"`` string). The corruption was introduced
+entirely by the consolidation task's own retelling.
+
+Fixed the same way ``Budget.total_usd`` was: stop asking the LLM to
+restate a value that already exists elsewhere as real data.
+``build_itinerary_task()`` and ``build_food_task()`` now have their own
+``output_pydantic`` types, ``ItineraryResearch`` and ``FoodResearch``
+(``tripcrew/schemas.py``), so ``get_attractions()``, ``get_weather()``, and
+``get_restaurants()``'s actual return values exist as structured task
+output in their own right, not only as prose the consolidation task has to
+re-read. ``agent.py``'s ``assemble_trip_plan()`` is the function that
+actually uses this: called on the finished crew's result, it finds the
+consolidation task's ``TripPlan`` the same way ``app.py`` always did (by
+``isinstance`` on ``tasks_output``, not a fixed list index), then
+overwrites its ``attractions``, ``weather``, and ``restaurants`` with the
+itinerary and food tasks' real structured output before anything (the
+sidebar, the PDF, the follow-up chatbot) sees it. ``app.py`` calls
+``assemble_trip_plan()`` instead of reading the consolidation task's
+``TripPlan`` directly now.
+
+The consolidation task still produces its own (unused) version of these
+three fields, since telling it to skip them entirely bought nothing:
+``expected_output`` still describes a complete plan, and the real values
+get substituted in regardless of what it writes there. Its budget,
+flights, hotel, destination, and open_questions are still trusted as its
+own output, only the three research-derived list fields get the
+override, and only because a real bug proved the restating step corrupts
+them.
+
 PDF export
 -------------
 

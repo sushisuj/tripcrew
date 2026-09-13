@@ -95,6 +95,18 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
 - Keep `.env` out of git. `.env.example` documents the shape without real
   keys. This has already gone wrong once in a different project on this
   account. Don't repeat it here.
+- `tripcrew/app.py` has to fix its own `sys.path` before its `from
+  tripcrew.xxx import ...` lines, don't remove that block thinking it's
+  dead code. Confirmed by reading Streamlit's own `bootstrap.py`:
+  `streamlit run tripcrew/app.py` only ever adds `app.py`'s own directory
+  to `sys.path` (`_fix_sys_path()` does `os.path.dirname()` on the
+  script's already-absolute path), never the project root one level up
+  that `tripcrew` actually needs to resolve as a package. Without the
+  shim, the documented run command fails with `ModuleNotFoundError: No
+  module named 'tripcrew'` regardless of which directory it's launched
+  from, `python -m streamlit run ...` happens to dodge it since `python
+  -m` adds the current directory on its own, but that's incidental
+  interpreter behavior, not something worth depending on.
 - New tools should follow the shape already in `tripcrew/tools/`: a single
   `@tool`-decorated function, a pydantic return type from `schemas.py`, and
   a docstring that says what's real versus what's a placeholder.

@@ -22,6 +22,28 @@ ask a clarifying question, nothing new is computed for it. It's a status
 panel, not a second source of truth.
 """
 
+import os
+import sys
+
+# streamlit run tripcrew/app.py only ever adds THIS file's own directory
+# (tripcrew/tripcrew/) to sys.path -- confirmed by reading Streamlit's own
+# bootstrap.py: _fix_sys_path() does sys.path.insert(0, os.path.dirname(
+# main_script_path)), and main_script_path is already absolute by the time
+# it gets there (set via os.path.abspath() in cli.py). That's one directory
+# short of what `from tripcrew.agent import ...` below actually needs: the
+# project root (this file's parent's parent), which is what has to be on
+# sys.path for `tripcrew` to resolve as a package at all. Without this,
+# `streamlit run tripcrew/app.py` fails with "ModuleNotFoundError: No
+# module named 'tripcrew'" no matter which directory you launch it from --
+# confirmed directly with Streamlit's own AppTest harness, not assumed.
+# `python -m streamlit run ...` happens to dodge it, since `python -m`
+# always adds the current directory to sys.path on its own, but that's
+# incidental interpreter behavior, not something this app should depend on
+# a launch flag to get right.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 import streamlit as st
 from dotenv import load_dotenv
 

@@ -70,6 +70,35 @@ class WeatherReport(BaseModel):
     )
 
 
+class ItineraryResearch(BaseModel):
+    """Real output type for the itinerary research task (see agent.py's
+    build_itinerary_task()), not just TripPlan's own attractions/weather
+    fields reused loosely. Exists so get_attractions()'s and get_weather()'s
+    actual return values survive to the final plan verbatim, instead of the
+    consolidation task's LLM re-authoring them from context: a real London
+    run came back with the weather summary "Light rain, ~22C (approximate)
+    (approximate)", a corruption introduced only in that re-authoring step,
+    since get_weather() itself never produces a tilde or a doubled
+    "(approximate)". agent.py's assemble_trip_plan() reads this task's
+    output directly and overwrites the consolidation task's copy with it,
+    same "don't trust a restated value, use the real one" rule
+    Budget.recompute() already applies to numbers, applied here to lists.
+    """
+
+    attractions: list[Attraction] = Field(default_factory=list)
+    weather: list[WeatherReport] = Field(default_factory=list)
+
+
+class FoodResearch(BaseModel):
+    """Real output type for the food research task (see agent.py's
+    build_food_task()), same reasoning as ItineraryResearch: keeps
+    get_restaurants()'s actual return value intact through to the final
+    plan instead of letting the consolidation task's LLM restate it.
+    """
+
+    restaurants: list[Restaurant] = Field(default_factory=list)
+
+
 class Budget(BaseModel):
     flights_usd: float = 0
     hotel_usd: float = 0

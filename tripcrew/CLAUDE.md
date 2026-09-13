@@ -150,6 +150,25 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   return cost data for catering places either, so a real run always flags
   `"restaurants"` in `unpriced_categories` right now, not a bug, the
   honest state of the data.
+- The consolidation task can't be trusted to restate attractions, weather,
+  or restaurants either, same failure class as the `Budget.total_usd` bullet
+  above, just applied to lists of text instead of a number. A real London
+  run proved it: the weather table came back with "Light rain, ~22C
+  (approximate) (approximate)", a corruption `get_weather()` itself never
+  produces, introduced only by `build_consolidation_task`'s LLM re-authoring
+  `TripPlan.weather` from context instead of copying it. Fixed by giving
+  `build_itinerary_task`/`build_itinerary_task_from_plan` and
+  `build_food_task`/`build_food_task_from_plan` their own `output_pydantic`
+  types (`ItineraryResearch`, `FoodResearch` in `schemas.py`), and adding
+  `agent.py`'s `assemble_trip_plan()`, which finds the consolidation task's
+  `TripPlan` and overwrites its `attractions`/`weather`/`restaurants` with
+  those two tasks' real structured output before anything downstream sees
+  it. `app.py` calls `assemble_trip_plan()`, it doesn't read the
+  consolidation task's `TripPlan` directly any more. If a new research
+  field ever gets added to the itinerary or food task, it needs the same
+  treatment (a real `output_pydantic` type, plus a line in
+  `assemble_trip_plan()`), not just a mention in the consolidation task's
+  own output, or it inherits this same restating risk.
 - `app.py`'s `STAGE_LABELS` list has to have exactly as many entries as
   `build_crew(intake_plan=...)` has tasks, since `task_callback` fires once
   per completed task and counts against that list by index. Adding a role

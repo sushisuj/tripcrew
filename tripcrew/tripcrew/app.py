@@ -47,10 +47,9 @@ if _PROJECT_ROOT not in sys.path:
 import streamlit as st
 from dotenv import load_dotenv
 
-from tripcrew.agent import build_crew, build_intake_crew
+from tripcrew.agent import assemble_trip_plan, build_crew, build_intake_crew
 from tripcrew.followup import answer_trip_question
 from tripcrew.pdf_export import build_trip_pdf
-from tripcrew.schemas import TripPlan
 
 load_dotenv()
 st.set_page_config(page_title="tripcrew", layout="centered", initial_sidebar_state="expanded")
@@ -317,16 +316,18 @@ if prompt:
                 # presenter's, which has no output_pydantic set -- confirmed
                 # via crew.py's _create_crew_output, it just copies whichever
                 # task ran last). The real structured plan, with the actual
-                # computed budget, lives on the consolidation task specifically,
-                # found here by type rather than a fixed list index so this
-                # doesn't silently break if build_crew()'s task order ever
-                # changes. Previously the sidebar kept showing the pre-crew
-                # draft even after the full plan finished (see render_sidebar's
-                # own docstring) -- this is that fix.
-                consolidated_plan = next(
-                    (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
-                    None,
-                )
+                # computed budget, lives on the consolidation task specifically.
+                # assemble_trip_plan() (agent.py) finds it by type rather than a
+                # fixed list index so this doesn't silently break if
+                # build_crew()'s task order ever changes, and it also swaps in
+                # the itinerary/food tasks' own structured attractions, weather,
+                # and restaurants instead of the consolidation task's retelling
+                # of them -- see that function's docstring for the real bug
+                # (a corrupted weather summary) that made this necessary.
+                # Previously the sidebar kept showing the pre-crew draft even
+                # after the full plan finished (see render_sidebar's own
+                # docstring) -- this is that fix.
+                consolidated_plan = assemble_trip_plan(result)
                 if consolidated_plan is not None:
                     st.session_state.trip_plan = consolidated_plan
 

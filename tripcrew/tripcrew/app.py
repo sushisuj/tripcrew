@@ -180,6 +180,14 @@ def render_sidebar() -> None:
     Previously this only ever showed the draft, real budget included, since
     build_crew().kickoff()'s own .pydantic is the last task's output (the
     presenter's free-text write-up, not the consolidation task's TripPlan).
+
+    Also shows plan.research_gaps once the full crew finishes, if
+    assemble_trip_plan() (agent.py) flagged any -- attractions, restaurants,
+    or weather that came back empty or too thin even after the lookup
+    tools' own widen-and-retry react step. Shown under "Still need" only in
+    the sense of sharing its orange heading style; it's a different signal
+    from open_questions (a tool came back short, not the traveler), so it's
+    only checked once open_questions is already empty.
     """
     plan = st.session_state.trip_plan
 
@@ -200,21 +208,32 @@ def render_sidebar() -> None:
             st.sidebar.markdown('<div class="heading-orange">Still need</div>', unsafe_allow_html=True)
             for question in plan.open_questions:
                 st.sidebar.write(f"- {question}")
-        elif st.session_state.trip_write_up:
-            # trip_write_up only gets set once the full crew finishes (see
-            # the `if prompt:` block), so its presence here means `plan` is
-            # the real consolidated TripPlan, not the pre-crew draft --
-            # safe to hand both to build_trip_pdf. Rebuilt on every rerun
-            # rather than cached: it's a fast, local, no-network render, not
-            # worth the staleness risk of caching it against "Start over"
-            # or a follow-up message forgetting to invalidate it.
-            pdf_bytes = build_trip_pdf(plan, st.session_state.trip_write_up)
-            st.sidebar.download_button(
-                "Download trip plan (PDF)",
-                data=pdf_bytes,
-                file_name=f"{plan.destination.lower().replace(' ', '_')}_trip_plan.pdf",
-                mime="application/pdf",
-            )
+        else:
+            # research_gaps only ever gets populated by assemble_trip_plan()
+            # (agent.py), which only runs once the full crew finishes -- same
+            # timing as trip_write_up below, but checked separately since a
+            # plan can in principle finish with no gaps at all, in which case
+            # this heading just doesn't render.
+            if plan.research_gaps:
+                st.sidebar.markdown('<div class="heading-orange">Research gaps</div>', unsafe_allow_html=True)
+                for gap in plan.research_gaps:
+                    st.sidebar.write(f"- {gap}")
+
+            if st.session_state.trip_write_up:
+                # trip_write_up only gets set once the full crew finishes (see
+                # the `if prompt:` block), so its presence here means `plan` is
+                # the real consolidated TripPlan, not the pre-crew draft --
+                # safe to hand both to build_trip_pdf. Rebuilt on every rerun
+                # rather than cached: it's a fast, local, no-network render, not
+                # worth the staleness risk of caching it against "Start over"
+                # or a follow-up message forgetting to invalidate it.
+                pdf_bytes = build_trip_pdf(plan, st.session_state.trip_write_up)
+                st.sidebar.download_button(
+                    "Download trip plan (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"{plan.destination.lower().replace(' ', '_')}_trip_plan.pdf",
+                    mime="application/pdf",
+                )
 
     st.sidebar.divider()
     if st.sidebar.button("Start over"):

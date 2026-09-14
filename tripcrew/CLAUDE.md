@@ -219,6 +219,30 @@ that's exactly the mistake that created this.
   occasionally diverge slightly from the PDF's tables. That's not new,
   the write-up was always the LLM's own retelling rather than grounded
   data, treat the PDF's tables as the source of truth, not the prose.
+- An empty tool result deserves a real second attempt, not just a note.
+  `get_attractions()` and `get_restaurants()` (`tripcrew/tools/`) both widen
+  their Geoapify search radius once (`WIDE_SEARCH_RADIUS_METERS`, 25km, up
+  from the normal 10km) if their narrower search comes back empty, before
+  returning `[]`. That's the "react" half. The "evaluate" half is
+  `agent.py`'s `_evaluate_research_gaps()`, called from
+  `assemble_trip_plan()` after attractions/restaurants/weather are the real
+  substituted values: it flags a category in `TripPlan.research_gaps`
+  whenever it's empty, or (`THIN_RESEARCH_THRESHOLD`) has only one result,
+  since one attraction for a whole trip isn't meaningfully different from
+  zero for planning purposes. This closes a real gap, not a hypothetical
+  one: a London run had `get_attractions()` come back empty (since fixed,
+  see the notability bullet above) and nothing downstream reacted to it,
+  the write-up just quietly described a trip with no attractions as if
+  that were the whole story. `research_gaps` isn't authored by any task's
+  own LLM, same as `attractions`/`weather`/`restaurants` themselves,
+  `assemble_trip_plan()` overwrites it fresh every time. `app.py`'s
+  sidebar (`render_sidebar()`) is the reliable place a traveler actually
+  sees it today; the presentation task is told to mention it too, but it's
+  reading the consolidation task's own (always-empty, at that point in the
+  chain) copy of the field, same timing caveat as the day-by-day write-up
+  bullet above. Don't raise `THIN_RESEARCH_THRESHOLD` casually, it's meant
+  to catch "the tool basically came up empty," not flag every small
+  destination that genuinely only has a handful of real, notable places.
 
 ## Architecture note: multi-agent, not single-agent
 

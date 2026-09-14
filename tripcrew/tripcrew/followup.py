@@ -108,7 +108,9 @@ def format_answer(trip_plan: TripPlan, intent: TripQuestionIntent) -> str:
         if not trip_plan.attractions:
             return "No attractions are available for this trip."
         lines = [
-            f"- {attraction.name}" + (f" ({attraction.category})" if attraction.category else "")
+            (f"- Day {attraction.day}: " if attraction.day is not None else "- ")
+            + attraction.name
+            + (f" ({attraction.category})" if attraction.category else "")
             for attraction in trip_plan.attractions
         ]
         return "Attractions for this trip:\n" + "\n".join(lines)
@@ -117,7 +119,9 @@ def format_answer(trip_plan: TripPlan, intent: TripQuestionIntent) -> str:
         if not trip_plan.restaurants:
             return "No restaurants are available for this trip."
         lines = [
-            f"- {restaurant.name}" + (f" ({restaurant.category})" if restaurant.category else "")
+            (f"- Day {restaurant.day}: " if restaurant.day is not None else "- ")
+            + restaurant.name
+            + (f" ({restaurant.category})" if restaurant.category else "")
             for restaurant in trip_plan.restaurants
         ]
         return "Restaurants and cafes near this trip's destination (not a rated or curated list, just what's nearby):\n" + "\n".join(lines)

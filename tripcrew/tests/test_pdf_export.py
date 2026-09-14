@@ -196,6 +196,79 @@ def test_restaurants_with_days_render_under_day_headings_and_keep_the_note():
     assert "not a rated or curated list" in text
 
 
+def test_write_up_text_outside_winansi_does_not_render_as_a_missing_glyph_box():
+    # Regression test for a real bug: a real London PDF rendered "Check-in"
+    # as "Check[missing-glyph-box]in" because the presenter LLM used a
+    # non-breaking hyphen there instead of a plain one, which reportlab's
+    # base font (WinAnsiEncoding) can't draw. _sanitize_for_pdf() maps the
+    # specific characters LLMs are known to reach for back to a safe
+    # equivalent before the text ever reaches reportlab.
+    plan = TripPlan(destination="London", days=4)
+
+    pdf_bytes = build_trip_pdf(
+        plan,
+        write_up="Check‑in: 14 Sep, Check‑out: 18 Sep. Forecast: 22 °C.",
+    )
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Check-in" in text
+    assert "Check-out" in text
+    assert "22 °C" in text
+    assert "■" not in text  # the missing-glyph placeholder pypdf reports
+
+
+def test_write_up_text_with_genuinely_accented_names_is_left_alone():
+    # The fix above must not mangle real accented text that WinAnsi already
+    # supports fine -- confirmed against the actual Lisbon restaurant names
+    # from a live run ("Café Batata", "Porto Brandão").
+    plan = TripPlan(destination="Lisbon", days=3)
+
+    pdf_bytes = build_trip_pdf(plan, write_up="Try Café Batata and Porto Brandão for dinner.")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Café Batata" in text
+    assert "Porto Brandão" in text
+
+
+def test_write_up_text_with_no_cp1252_equivalent_is_dropped_not_left_as_a_box():
+    plan = TripPlan(destination="Lisbon", days=1)
+
+    pdf_bytes = build_trip_pdf(plan, write_up="Great trip \U0001f389 enjoy!")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Great trip" in text
+    assert "enjoy" in text
+    assert "■" not in text
+
+
+def test_research_gaps_are_rendered_from_the_real_plan():
+    # The real gap this closes: research_gaps was only ever shown in
+    # app.py's sidebar, never in the downloadable PDF -- pdf_export.py had
+    # zero references to it before this.
+    plan = TripPlan(
+        destination="Lisbon",
+        days=3,
+        research_gaps=[
+            "Attractions: no results found for Lisbon, even after widening the search.",
+        ],
+    )
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Research Gaps" in text
+    assert "Attractions: no results found for Lisbon" in text
+
+
+def test_no_research_gaps_section_when_the_plan_has_none():
+    plan = TripPlan(destination="Lisbon", days=3)
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Research Gaps" not in text
+
+
 def test_special_characters_in_agent_text_do_not_break_rendering():
     # write_up comes from an LLM, attraction names from a live API --
     # reportlab's Paragraph parser treats <, >, & as XML, so unescaped

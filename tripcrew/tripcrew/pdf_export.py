@@ -14,6 +14,7 @@ instead of a chat response: if it's a number, it came from a tool, not
 from formatting code.
 """
 
+import unicodedata
 from io import BytesIO
 from xml.sax.saxutils import escape
 
@@ -29,6 +30,56 @@ _STYLES = getSampleStyleSheet()
 _HEADING_STYLE = ParagraphStyle("SectionHeading", parent=_STYLES["Heading2"], spaceBefore=14, spaceAfter=6)
 _SUBHEADING_STYLE = ParagraphStyle("DayHeading", parent=_STYLES["Heading3"], spaceBefore=8, spaceAfter=4)
 _TABLE_HEADER_BG = colors.HexColor("#6E8CC7")
+
+# reportlab's base Helvetica font uses WinAnsiEncoding (essentially CP1252),
+# not full Unicode, so a character outside that set has no glyph to draw and
+# renders as a missing-glyph box instead of failing loudly. Confirmed as a
+# real defect, not hypothetical: a real London PDF rendered "Check-in" as
+# "Check[box]in" in the write-up text -- pypdf's own extraction of that PDF
+# shows U+25A0 at each occurrence, the placeholder pypdf itself reports for
+# any glyph with no usable mapping, so the exact original character can't be
+# recovered after the fact, only guarded against going forward. These are
+# the specific characters an LLM is known to reach for that fall outside
+# WinAnsi; NFKD normalization below is the fallback for anything not in this
+# table (it correctly leaves genuinely accented names like "Café Batata" or
+# "Porto Brandão" alone, both of which *are* in WinAnsi).
+_UNICODE_PDF_FALLBACKS = {
+    "‑": "-",  # non-breaking hyphen
+    "−": "-",  # minus sign
+    " ": " ",  # thin space
+    " ": " ",  # hair space
+    " ": " ",  # figure space
+    " ": " ",  # punctuation space
+    " ": " ",  # narrow no-break space
+    "​": "",  # zero-width space
+    "﻿": "",  # zero-width no-break space / BOM
+}
+
+
+def _sanitize_for_pdf(text: str) -> str:
+    """Replaces characters reportlab's base font can't render with a safe
+    equivalent instead of letting them silently become a missing-glyph box.
+
+    Only applied to write_up below, the one field in this module that's raw
+    LLM prose rather than a tool's own data -- flight/hotel rows are mocked,
+    attraction/restaurant names come from Geoapify (real place names, not
+    free-form authoring), so write_up is the actual risk surface this
+    guards.
+    """
+    if not text:
+        return text
+    for bad, replacement in _UNICODE_PDF_FALLBACKS.items():
+        text = text.replace(bad, replacement)
+    try:
+        text.encode("cp1252")
+        return text
+    except UnicodeEncodeError:
+        pass
+    # Still something WinAnsi can't render (an emoji, a symbol with no
+    # CP1252 equivalent) -- NFKD-decompose and drop what's left rather than
+    # hand reportlab a character it can only draw as a box.
+    decomposed = unicodedata.normalize("NFKD", text)
+    return decomposed.encode("cp1252", errors="ignore").decode("cp1252")
 
 
 def _table(rows: list[list[str]], col_widths: list[float] | None = None) -> Table:
@@ -246,9 +297,26 @@ def build_trip_pdf(trip_plan: TripPlan, write_up: str) -> bytes:
         )
     story.append(Spacer(1, 14))
 
+    # trip_plan.research_gaps is the real, post-correction evaluation
+    # (agent.py's assemble_trip_plan()/_evaluate_research_gaps()), the same
+    # field app.py's sidebar renders under "Research gaps" -- this used to
+    # be the *only* place a traveler saw it: this module had zero
+    # references to research_gaps, so a downloaded PDF never carried the
+    # signal at all, even though the presentation write-up below sometimes
+    # reinvents its own informal version of it (that's the LLM noticing an
+    # empty list on its own, not this real field, and it runs before
+    # assemble_trip_plan()'s correction besides -- see CLAUDE.md's
+    # day-by-day-write-up timing caveat). Only rendered when non-empty, same
+    # as the sidebar.
+    if trip_plan.research_gaps:
+        story.append(Paragraph("Research Gaps", _HEADING_STYLE))
+        for gap in trip_plan.research_gaps:
+            story.append(Paragraph(f"• {escape(gap)}", _STYLES["Normal"]))
+        story.append(Spacer(1, 14))
+
     story.append(Paragraph("Trip Summary", _HEADING_STYLE))
     for paragraph in write_up.split("\n\n"):
-        stripped = paragraph.strip()
+        stripped = _sanitize_for_pdf(paragraph.strip())
         if stripped:
             story.append(Paragraph(escape(stripped).replace("\n", "<br/>"), _STYLES["Normal"]))
             story.append(Spacer(1, 6))

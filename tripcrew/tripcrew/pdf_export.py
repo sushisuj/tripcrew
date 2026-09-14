@@ -27,6 +27,7 @@ from tripcrew.schemas import TripPlan
 
 _STYLES = getSampleStyleSheet()
 _HEADING_STYLE = ParagraphStyle("SectionHeading", parent=_STYLES["Heading2"], spaceBefore=14, spaceAfter=6)
+_SUBHEADING_STYLE = ParagraphStyle("DayHeading", parent=_STYLES["Heading3"], spaceBefore=8, spaceAfter=4)
 _TABLE_HEADER_BG = colors.HexColor("#6E8CC7")
 
 
@@ -54,6 +55,63 @@ def _table(rows: list[list[str]], col_widths: list[float] | None = None) -> Tabl
         )
     )
     return table
+
+
+def _render_day_grouped_section(
+    story: list,
+    heading: str,
+    items: list,
+    empty_message: str,
+    trailing_note: str | None = None,
+) -> None:
+    """Renders an Attractions- or Restaurants-shaped section (both models
+    have .name, .category, and now .day, see schemas.py), grouped under a
+    "Day N" subheading wherever the itinerary/food agent assigned one.
+
+    day is best-effort (Attraction.day/Restaurant.day default to None when
+    the agent wasn't confident, and assemble_trip_plan() clears any
+    out-of-range value back to None too), so this only switches into
+    day-grouped rendering once at least one item actually has a day.
+    Otherwise it falls back to the original flat table -- a page with
+    every attraction under a single "Unscheduled" heading would look
+    broken, not honest, when really day assignment just isn't populated
+    for this run.
+    """
+    story.append(Paragraph(heading, _HEADING_STYLE))
+    if not items:
+        story.append(Paragraph(empty_message, _STYLES["Normal"]))
+        story.append(Spacer(1, 10))
+        return
+
+    scheduled: dict[int, list] = {}
+    unscheduled: list = []
+    for item in items:
+        if item.day is not None:
+            scheduled.setdefault(item.day, []).append(item)
+        else:
+            unscheduled.append(item)
+
+    def _rows(group: list) -> list[list[str]]:
+        rows = [["Name", "Category"]]
+        for item in group:
+            rows.append([item.name, item.category or "—"])
+        return rows
+
+    if scheduled:
+        for day in sorted(scheduled):
+            story.append(Paragraph(f"Day {day}", _SUBHEADING_STYLE))
+            story.append(_table(_rows(scheduled[day]), col_widths=[3.5 * inch, 3 * inch]))
+            story.append(Spacer(1, 6))
+        if unscheduled:
+            story.append(Paragraph("Unscheduled", _SUBHEADING_STYLE))
+            story.append(_table(_rows(unscheduled), col_widths=[3.5 * inch, 3 * inch]))
+    else:
+        story.append(_table(_rows(items), col_widths=[3.5 * inch, 3 * inch]))
+
+    if trailing_note:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(escape(trailing_note), _STYLES["Italic"]))
+    story.append(Spacer(1, 10))
 
 
 def build_trip_pdf(trip_plan: TripPlan, write_up: str) -> bytes:
@@ -120,35 +178,25 @@ def build_trip_pdf(trip_plan: TripPlan, write_up: str) -> bytes:
         story.append(_table(rows))
         story.append(Spacer(1, 10))
 
-    story.append(Paragraph("Attractions", _HEADING_STYLE))
-    if trip_plan.attractions:
-        rows = [["Name", "Category"]]
-        for attraction in trip_plan.attractions:
-            rows.append([attraction.name, attraction.category or "—"])
-        story.append(_table(rows, col_widths=[3.5 * inch, 3 * inch]))
-    else:
-        story.append(Paragraph("No attractions available for this trip.", _STYLES["Normal"]))
-    story.append(Spacer(1, 10))
+    _render_day_grouped_section(
+        story,
+        "Attractions",
+        trip_plan.attractions,
+        "No attractions available for this trip.",
+    )
 
-    story.append(Paragraph("Restaurants", _HEADING_STYLE))
-    if trip_plan.restaurants:
-        rows = [["Name", "Category"]]
-        for restaurant in trip_plan.restaurants:
-            rows.append([restaurant.name, restaurant.category or "—"])
-        story.append(_table(rows, col_widths=[3.5 * inch, 3 * inch]))
-        story.append(Spacer(1, 6))
-        story.append(
-            Paragraph(
-                escape(
-                    "Note: these are places nearby in the restaurant/cafe/fast-food "
-                    "categories, not a rated or curated list."
-                ),
-                _STYLES["Italic"],
-            )
-        )
-    else:
-        story.append(Paragraph("No restaurants available for this trip.", _STYLES["Normal"]))
-    story.append(Spacer(1, 10))
+    _render_day_grouped_section(
+        story,
+        "Restaurants",
+        trip_plan.restaurants,
+        "No restaurants available for this trip.",
+        trailing_note=(
+            "Note: these are places nearby in the restaurant/cafe/fast-food "
+            "categories, not a rated or curated list."
+            if trip_plan.restaurants
+            else None
+        ),
+    )
 
     story.append(Paragraph("Weather", _HEADING_STYLE))
     if trip_plan.weather:

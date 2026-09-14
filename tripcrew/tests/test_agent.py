@@ -14,6 +14,14 @@ a live crew run.
 build_crew()'s task wiring (five tasks with no intake_plan, four with one,
 and which output_pydantic each research task carries) is also covered here,
 since nothing else in the suite exercises agent.py at all.
+
+Also covers the day-clamping half of assemble_trip_plan(): Attraction.day/
+Restaurant.day are genuine LLM-authored values (the itinerary/food agent's
+own reasoning, not a tool's raw output, see Attraction.day's docstring in
+schemas.py), so they're not restated the way attractions/weather/restaurants
+themselves are, but they can still be wrong the way any model output can,
+so anything outside 1..TripPlan.days gets reset to None rather than shown
+as, say, "Day 7" on a 3-day trip.
 """
 
 from dataclasses import dataclass
@@ -132,6 +140,68 @@ def test_assemble_trip_plan_leaves_research_fields_alone_if_not_found():
 def test_assemble_trip_plan_returns_none_without_a_trip_plan():
     result = _FakeCrewOutput(tasks_output=[_FakeTaskOutput(pydantic=None)])
     assert assemble_trip_plan(result) is None
+
+
+def test_assemble_trip_plan_clears_an_out_of_range_day():
+    # A 3-day trip: day=7 on an attraction and day=0 on a restaurant are
+    # both impossible values the itinerary/food agent shouldn't have
+    # produced, but could -- clamp rather than show a broken day number.
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[
+            Attraction(name="Tower of London", city="London", day=2),
+            Attraction(name="Impossible Museum", city="London", day=7),
+        ],
+        weather=[],
+    )
+    real_food = FoodResearch(
+        restaurants=[
+            Restaurant(name="Dishoom", city="London", day=1),
+            Restaurant(name="Zero Day Cafe", city="London", day=0),
+        ]
+    )
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=real_food),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan is not None
+    assert plan.days == 3
+    days_by_attraction = {a.name: a.day for a in plan.attractions}
+    assert days_by_attraction["Tower of London"] == 2
+    assert days_by_attraction["Impossible Museum"] is None
+    days_by_restaurant = {r.name: r.day for r in plan.restaurants}
+    assert days_by_restaurant["Dishoom"] == 1
+    assert days_by_restaurant["Zero Day Cafe"] is None
+
+
+def test_assemble_trip_plan_leaves_a_valid_day_alone():
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[Attraction(name="Tower of London", city="London", day=3)],
+        weather=[],
+    )
+    real_food = FoodResearch(restaurants=[Restaurant(name="Dishoom", city="London", day=None)])
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=real_food),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan is not None
+    assert plan.attractions[0].day == 3
+    assert plan.restaurants[0].day is None
 
 
 def test_itinerary_tasks_use_itinerary_research_as_output_type():

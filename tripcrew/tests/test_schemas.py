@@ -6,7 +6,7 @@ the clarification flow, budget arithmetic against known inputs) comes once
 those pieces exist.
 """
 
-from tripcrew.schemas import Attraction, Budget, Flight, Hotel, TripPlan
+from tripcrew.schemas import Attraction, Budget, Flight, Hotel, Restaurant, TripPlan
 
 
 def test_budget_recompute_sums_the_parts():
@@ -48,3 +48,21 @@ def test_hotel_and_attraction_construct_with_minimal_fields():
     attraction = Attraction(name="Louvre", city="Paris")
     assert hotel.price_per_night_usd is None
     assert attraction.estimated_cost_usd is None
+
+
+def test_attraction_and_restaurant_day_default_to_unset():
+    # day is best-effort, populated by the itinerary/food agent's own
+    # reasoning, not by the Geoapify tools -- unset (None) has to be the
+    # default, not day 1, so a place the agent couldn't confidently place
+    # isn't silently shown as scheduled for day one specifically.
+    attraction = Attraction(name="Louvre", city="Paris")
+    restaurant = Restaurant(name="Le Comptoir", city="Paris")
+    assert attraction.day is None
+    assert restaurant.day is None
+
+
+def test_attraction_and_restaurant_accept_a_day():
+    attraction = Attraction(name="Louvre", city="Paris", day=2)
+    restaurant = Restaurant(name="Le Comptoir", city="Paris", day=1)
+    assert attraction.day == 2
+    assert restaurant.day == 1

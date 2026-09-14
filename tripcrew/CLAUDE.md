@@ -58,12 +58,11 @@ that's exactly the mistake that created this.
 
 ## Project conventions
 
+### Groundedness: don't trust an LLM to restate or compute what it already has
+
 - Tool outputs are pydantic models (see `tripcrew/schemas.py`), not free
   text. This is what makes "evaluate the results" in the agent loop an
   actual step instead of a formality.
-- Every model with a `source` field (`Flight`, `Hotel`) must be honest about
-  where the data came from. `"mocked"` is a valid, expected value right
-  now. It is not something to hide or work around.
 - Don't let an LLM state a derived number (a total, a sum) and trust it.
   Compute it from the parts in code, the way `Budget.recompute()` does. This
   is a direct lesson from a real hallucination caught in the Constellate
@@ -77,6 +76,69 @@ that's exactly the mistake that created this.
   unknown, it goes in `unpriced_categories`, not folded into the total as
   zero, and the presentation task has to say so rather than show a total
   that looks complete.
+- `estimate_budget` is a real `@tool` now, and `consolidation_agent` has it
+  as its one tool. This closed the gap where the LLM used to write
+  `Budget.total_usd` itself as part of its own structured output, the exact
+  thing the bullet above warns against. Don't strip that tool back off or
+  let the consolidation task go back to computing a total from memory.
+- The consolidation task can't be trusted to restate attractions, weather,
+  or restaurants either, same failure class as the `Budget.total_usd` bullet
+  above, just applied to lists of text instead of a number. A real London
+  run proved it: the weather table came back with "Light rain, ~22C
+  (approximate) (approximate)", a corruption `get_weather()` itself never
+  produces, introduced only by `build_consolidation_task`'s LLM re-authoring
+  `TripPlan.weather` from context instead of copying it. Fixed by giving
+  `build_itinerary_task`/`build_itinerary_task_from_plan` and
+  `build_food_task`/`build_food_task_from_plan` their own `output_pydantic`
+  types (`ItineraryResearch`, `FoodResearch` in `schemas.py`), and adding
+  `agent.py`'s `assemble_trip_plan()`, which finds the consolidation task's
+  `TripPlan` and overwrites its `attractions`/`weather`/`restaurants` with
+  those two tasks' real structured output before anything downstream sees
+  it. `app.py` calls `assemble_trip_plan()`, it doesn't read the
+  consolidation task's `TripPlan` directly any more. If a new research
+  field ever gets added to the itinerary or food task, it needs the same
+  treatment (a real `output_pydantic` type, plus a line in
+  `assemble_trip_plan()`), not just a mention in the consolidation task's
+  own output, or it inherits this same restating risk.
+- `Attraction.day`/`Restaurant.day` are a different kind of value from
+  everything else on those models: not a tool's raw output, the
+  itinerary/food agent's own reasoning about which day (1-indexed) a place
+  belongs on, using the weather forecast for attractions, an even spread
+  for restaurants. That means it's genuinely LLM-authored, not a restated
+  value, no conflict with the "don't trust a restated value" rule above.
+  It can still be wrong the way any model output can, so
+  `agent.py`'s `assemble_trip_plan()` clears any day outside `1..TripPlan.days`
+  back to `None` rather than show, say, "Day 7" on a 3-day trip. `None`
+  means "not confidently placed," not day 0, don't treat it as scheduled
+  for day one. `pdf_export.py` groups by day when at least one item has
+  one, and falls back to the original flat table when none do, a page
+  showing every attraction under a single "Unscheduled" heading would look
+  broken, not honest, when day assignment just isn't populated for that run.
+  The presentation task's own day-by-day write-up reads the consolidation
+  task's copy of these fields, not the corrected one `assemble_trip_plan()`
+  produces (that overwrite only happens after `crew.kickoff()` returns, the
+  presenter has already run by then), so the write-up's sequencing can
+  occasionally diverge slightly from the PDF's tables. That's not new,
+  the write-up was always the LLM's own retelling rather than grounded
+  data, treat the PDF's tables as the source of truth, not the prose.
+- The reasoning trail (`agent.py`'s `extract_reasoning()`/
+  `reasoning_entry_for()`, surfaced in `app.py` as a collapsed "How the
+  agent got here" expander) is not `TaskOutput.raw`. For a task with
+  `output_pydantic` set, `.raw` is just that structured output restated as
+  JSON (confirmed reading `crewai`'s `task.py`: `_execute_core()` does
+  `raw = result.model_dump_json()`), the same data again, not the agent's
+  reasoning. `.messages` is where the real conversation transcript lives
+  (confirmed via `agent/utils.py`'s `save_last_messages()`), including any
+  free text the agent wrote before or between tool calls. `extract_reasoning()`
+  keeps only the assistant role's own text, in call order. This is
+  unverified by design, the same caveat this file already documents for
+  the presentation task's write-up: it's the agent's own retelling of its
+  process, shown for transparency, never something to fold into `TripPlan`
+  or trust the way a tool's structured output is trusted. Don't let it
+  drift into becoming a second, unchecked source of "facts" about the trip.
+
+### Research tools: honesty about what Geoapify/OpenWeatherMap can't tell you, and reacting when they come back empty
+
 - A category match is not notability. `get_attractions()`'s Places request
   used to filter on category alone, which is how a Lisbon trip came back
   with a minor spot in Trafaria, a separate town across the river, since
@@ -86,15 +148,6 @@ that's exactly the mistake that created this.
   the unfiltered search if that comes back empty, which happens for
   smaller destinations with thin Wikipedia coverage. Don't drop the
   notable-first request to "simplify" this, that's the actual fix.
-- `estimate_budget()` and the weather date-matching logic
-  (`_closest_forecast_entry()`) both have real test coverage now
-  (`tests/test_budget.py`, `tests/test_weather.py`), mocking `requests.get`
-  the same way `test_attractions.py` does. One behavior the budget tests
-  document rather than fix: `unpriced_categories` only flags a category
-  when *none* of its items have a price, so a mix of priced and unpriced
-  attractions reports a real but incomplete total with no flag. Tighten
-  that on purpose if it ever needs it, don't "fix" it as a side effect of
-  touching something else.
 - An approximate forecast is not a real one. `get_weather()` still returns
   the closest available entry for a date beyond OpenWeatherMap's 5-day free
   tier window, same as before, but `WeatherReport.is_approximate` now says
@@ -104,52 +157,6 @@ that's exactly the mistake that created this.
   for that date. This isn't the seasonal-average fallback `weather.py` still
   mentions as the fuller fix, it's the honest version of the current
   approximation, not a replacement for it.
-- `estimate_budget` is a real `@tool` now, and `consolidation_agent` has it
-  as its one tool. This closed the gap where the LLM used to write
-  `Budget.total_usd` itself as part of its own structured output, the exact
-  thing the bullet above warns against. Don't strip that tool back off or
-  let the consolidation task go back to computing a total from memory.
-- Flights and hotels are mocked on purpose, not by oversight. See
-  `docs/architecture.rst` for why (Skyscanner/Kiwi/Booking.com require
-  business-partner approval with no workable timeline; Amadeus's free tier
-  is sandbox data, not live pricing). Don't "fix" this by silently wiring in
-  a real API without updating that doc and the `source` field values.
-- Keep `.env` out of git. `.env.example` documents the shape without real
-  keys. This has already gone wrong once in a different project on this
-  account. Don't repeat it here.
-- `tripcrew/app.py` has to fix its own `sys.path` before its `from
-  tripcrew.xxx import ...` lines, don't remove that block thinking it's
-  dead code. Confirmed by reading Streamlit's own `bootstrap.py`:
-  `streamlit run tripcrew/app.py` only ever adds `app.py`'s own directory
-  to `sys.path` (`_fix_sys_path()` does `os.path.dirname()` on the
-  script's already-absolute path), never the project root one level up
-  that `tripcrew` actually needs to resolve as a package. Without the
-  shim, the documented run command fails with `ModuleNotFoundError: No
-  module named 'tripcrew'` regardless of which directory it's launched
-  from, `python -m streamlit run ...` happens to dodge it since `python
-  -m` adds the current directory on its own, but that's incidental
-  interpreter behavior, not something worth depending on.
-- New tools should follow the shape already in `tripcrew/tools/`: a single
-  `@tool`-decorated function, a pydantic return type from `schemas.py`, and
-  a docstring that says what's real versus what's a placeholder.
-- `tripcrew/pdf_export.py` is deliberately not under `tripcrew/tools/`: no
-  agent calls it, app.py calls `build_trip_pdf()` directly once a trip is
-  fully planned. Every number in it comes straight from `TripPlan.budget`,
-  it never recomputes a total itself, same groundedness rule as the rest of
-  this project. One easy-to-reintroduce bug if this gets touched: reportlab
-  `Table` cells render plain strings literally (no XML parsing), but
-  `Paragraph` objects parse `<`, `>`, `&` as markup, so `escape()` belongs
-  on Paragraph text only, escaping a Table cell produces a literal
-  `-&gt;` on the page. Confirmed by rendering a sample and reading it back,
-  not just eyeballing the build succeeding.
-- `tripcrew/followup.py` is the same "not an agent tool" case as
-  `pdf_export.py`, plus one more rule specific to it: the LLM call in there
-  (`build_intent_task`, `output_pydantic=TripQuestionIntent`) is only ever
-  allowed to pick which field of `TripPlan` a question is about. It must
-  never gain a code path that lets it draft the actual answer text --
-  that's the one thing that would turn this from "graph traversal" back
-  into the RAG pipeline the design explicitly avoids. `format_answer()`
-  (plain Python) is the only thing allowed to produce the text a user sees.
 - A category match is not curation, restaurant edition. `get_restaurants()`
   reuses the same Geoapify Places API and API key as `get_attractions()`,
   filtered to `catering.restaurant`, `catering.cafe`, and
@@ -172,25 +179,33 @@ that's exactly the mistake that created this.
   return cost data for catering places either, so a real run always flags
   `"restaurants"` in `unpriced_categories` right now, not a bug, the
   honest state of the data.
-- The consolidation task can't be trusted to restate attractions, weather,
-  or restaurants either, same failure class as the `Budget.total_usd` bullet
-  above, just applied to lists of text instead of a number. A real London
-  run proved it: the weather table came back with "Light rain, ~22C
-  (approximate) (approximate)", a corruption `get_weather()` itself never
-  produces, introduced only by `build_consolidation_task`'s LLM re-authoring
-  `TripPlan.weather` from context instead of copying it. Fixed by giving
-  `build_itinerary_task`/`build_itinerary_task_from_plan` and
-  `build_food_task`/`build_food_task_from_plan` their own `output_pydantic`
-  types (`ItineraryResearch`, `FoodResearch` in `schemas.py`), and adding
-  `agent.py`'s `assemble_trip_plan()`, which finds the consolidation task's
-  `TripPlan` and overwrites its `attractions`/`weather`/`restaurants` with
-  those two tasks' real structured output before anything downstream sees
-  it. `app.py` calls `assemble_trip_plan()`, it doesn't read the
-  consolidation task's `TripPlan` directly any more. If a new research
-  field ever gets added to the itinerary or food task, it needs the same
-  treatment (a real `output_pydantic` type, plus a line in
-  `assemble_trip_plan()`), not just a mention in the consolidation task's
-  own output, or it inherits this same restating risk.
+- An empty tool result deserves a real second attempt, not just a note.
+  `get_attractions()` and `get_restaurants()` (`tripcrew/tools/`) both widen
+  their Geoapify search radius once (`WIDE_SEARCH_RADIUS_METERS`, 25km, up
+  from the normal 10km) if their narrower search comes back empty, before
+  returning `[]`. That's the "react" half. The "evaluate" half is
+  `agent.py`'s `_evaluate_research_gaps()`, called from
+  `assemble_trip_plan()` after attractions/restaurants/weather are the real
+  substituted values: it flags a category in `TripPlan.research_gaps`
+  whenever it's empty, or (`THIN_RESEARCH_THRESHOLD`) has only one result,
+  since one attraction for a whole trip isn't meaningfully different from
+  zero for planning purposes. This closes a real gap, not a hypothetical
+  one: a London run had `get_attractions()` come back empty (since fixed,
+  see the notability bullet above) and nothing downstream reacted to it,
+  the write-up just quietly described a trip with no attractions as if
+  that were the whole story. `research_gaps` isn't authored by any task's
+  own LLM, same as `attractions`/`weather`/`restaurants` themselves,
+  `assemble_trip_plan()` overwrites it fresh every time. `app.py`'s
+  sidebar (`render_sidebar()`) is the reliable place a traveler actually
+  sees it today; the presentation task is told to mention it too, but it's
+  reading the consolidation task's own (always-empty, at that point in the
+  chain) copy of the field, same timing caveat as the day-by-day write-up
+  bullet above. Don't raise `THIN_RESEARCH_THRESHOLD` casually, it's meant
+  to catch "the tool basically came up empty," not flag every small
+  destination that genuinely only has a handful of real, notable places.
+
+### Crew orchestration: sequencing and status reporting
+
 - Itinerary research and food research run concurrently now
   (`async_execution=True` on both, `agent.py`'s `build_itinerary_task()`/
   `build_food_task()` and their `_from_plan` counterparts), not sequentially.
@@ -225,66 +240,68 @@ that's exactly the mistake that created this.
   crew, it needs an entry in `STAGE_LABELS_BY_OUTPUT_TYPE` (or the
   `PRESENTATION_STAGE_LABEL` fallback if it has no `output_pydantic`), not
   a new hardcoded position.
-- The reasoning trail (`agent.py`'s `extract_reasoning()`/
-  `reasoning_entry_for()`, surfaced in `app.py` as a collapsed "How the
-  agent got here" expander) is not `TaskOutput.raw`. For a task with
-  `output_pydantic` set, `.raw` is just that structured output restated as
-  JSON (confirmed reading `crewai`'s `task.py`: `_execute_core()` does
-  `raw = result.model_dump_json()`), the same data again, not the agent's
-  reasoning. `.messages` is where the real conversation transcript lives
-  (confirmed via `agent/utils.py`'s `save_last_messages()`), including any
-  free text the agent wrote before or between tool calls. `extract_reasoning()`
-  keeps only the assistant role's own text, in call order. This is
-  unverified by design, the same caveat this file already documents for
-  the presentation task's write-up: it's the agent's own retelling of its
-  process, shown for transparency, never something to fold into `TripPlan`
-  or trust the way a tool's structured output is trusted. Don't let it
-  drift into becoming a second, unchecked source of "facts" about the trip.
-- `Attraction.day`/`Restaurant.day` are a different kind of value from
-  everything else on those models: not a tool's raw output, the
-  itinerary/food agent's own reasoning about which day (1-indexed) a place
-  belongs on, using the weather forecast for attractions, an even spread
-  for restaurants. That means it's genuinely LLM-authored, not a restated
-  value, no conflict with the "don't trust a restated value" rule above.
-  It can still be wrong the way any model output can, so
-  `agent.py`'s `assemble_trip_plan()` clears any day outside `1..TripPlan.days`
-  back to `None` rather than show, say, "Day 7" on a 3-day trip. `None`
-  means "not confidently placed," not day 0, don't treat it as scheduled
-  for day one. `pdf_export.py` groups by day when at least one item has
-  one, and falls back to the original flat table when none do, a page
-  showing every attraction under a single "Unscheduled" heading would look
-  broken, not honest, when day assignment just isn't populated for that run.
-  The presentation task's own day-by-day write-up reads the consolidation
-  task's copy of these fields, not the corrected one `assemble_trip_plan()`
-  produces (that overwrite only happens after `crew.kickoff()` returns, the
-  presenter has already run by then), so the write-up's sequencing can
-  occasionally diverge slightly from the PDF's tables. That's not new,
-  the write-up was always the LLM's own retelling rather than grounded
-  data, treat the PDF's tables as the source of truth, not the prose.
-- An empty tool result deserves a real second attempt, not just a note.
-  `get_attractions()` and `get_restaurants()` (`tripcrew/tools/`) both widen
-  their Geoapify search radius once (`WIDE_SEARCH_RADIUS_METERS`, 25km, up
-  from the normal 10km) if their narrower search comes back empty, before
-  returning `[]`. That's the "react" half. The "evaluate" half is
-  `agent.py`'s `_evaluate_research_gaps()`, called from
-  `assemble_trip_plan()` after attractions/restaurants/weather are the real
-  substituted values: it flags a category in `TripPlan.research_gaps`
-  whenever it's empty, or (`THIN_RESEARCH_THRESHOLD`) has only one result,
-  since one attraction for a whole trip isn't meaningfully different from
-  zero for planning purposes. This closes a real gap, not a hypothetical
-  one: a London run had `get_attractions()` come back empty (since fixed,
-  see the notability bullet above) and nothing downstream reacted to it,
-  the write-up just quietly described a trip with no attractions as if
-  that were the whole story. `research_gaps` isn't authored by any task's
-  own LLM, same as `attractions`/`weather`/`restaurants` themselves,
-  `assemble_trip_plan()` overwrites it fresh every time. `app.py`'s
-  sidebar (`render_sidebar()`) is the reliable place a traveler actually
-  sees it today; the presentation task is told to mention it too, but it's
-  reading the consolidation task's own (always-empty, at that point in the
-  chain) copy of the field, same timing caveat as the day-by-day write-up
-  bullet above. Don't raise `THIN_RESEARCH_THRESHOLD` casually, it's meant
-  to catch "the tool basically came up empty," not flag every small
-  destination that genuinely only has a handful of real, notable places.
+
+### Supporting modules and app wiring
+
+- `tripcrew/app.py` has to fix its own `sys.path` before its `from
+  tripcrew.xxx import ...` lines, don't remove that block thinking it's
+  dead code. Confirmed by reading Streamlit's own `bootstrap.py`:
+  `streamlit run tripcrew/app.py` only ever adds `app.py`'s own directory
+  to `sys.path` (`_fix_sys_path()` does `os.path.dirname()` on the
+  script's already-absolute path), never the project root one level up
+  that `tripcrew` actually needs to resolve as a package. Without the
+  shim, the documented run command fails with `ModuleNotFoundError: No
+  module named 'tripcrew'` regardless of which directory it's launched
+  from, `python -m streamlit run ...` happens to dodge it since `python
+  -m` adds the current directory on its own, but that's incidental
+  interpreter behavior, not something worth depending on.
+- New tools should follow the shape already in `tripcrew/tools/`: a single
+  `@tool`-decorated function, a pydantic return type from `schemas.py`, and
+  a docstring that says what's real versus what's a placeholder.
+- `tripcrew/pdf_export.py` is deliberately not under `tripcrew/tools/`: no
+  agent calls it, app.py calls `build_trip_pdf()` directly once a trip is
+  fully planned. Every number in it comes straight from `TripPlan.budget`,
+  it never recomputes a total itself, same groundedness rule as the rest of
+  this project. One easy-to-reintroduce bug if this gets touched: reportlab
+  `Table` cells render plain strings literally (no XML parsing), but
+  `Paragraph` objects parse `<`, `>`, `&` as markup, so `escape()` belongs
+  on Paragraph text only, escaping a Table cell produces a literal
+  `-&gt;` on the page. Confirmed by rendering a sample and reading it back,
+  not just eyeballing the build succeeding.
+- `tripcrew/followup.py` is the same "not an agent tool" case as
+  `pdf_export.py`, plus one more rule specific to it: the LLM call in there
+  (`build_intent_task`, `output_pydantic=TripQuestionIntent`) is only ever
+  allowed to pick which field of `TripPlan` a question is about. It must
+  never gain a code path that lets it draft the actual answer text --
+  that's the one thing that would turn this from "graph traversal" back
+  into the RAG pipeline the design explicitly avoids. `format_answer()`
+  (plain Python) is the only thing allowed to produce the text a user sees.
+
+### Mocked data and project hygiene
+
+- Every model with a `source` field (`Flight`, `Hotel`) must be honest about
+  where the data came from. `"mocked"` is a valid, expected value right
+  now. It is not something to hide or work around.
+- Flights and hotels are mocked on purpose, not by oversight. See
+  `docs/architecture.rst` for why (Skyscanner/Kiwi/Booking.com require
+  business-partner approval with no workable timeline; Amadeus's free tier
+  is sandbox data, not live pricing). Don't "fix" this by silently wiring in
+  a real API without updating that doc and the `source` field values.
+- Keep `.env` out of git. `.env.example` documents the shape without real
+  keys. This has already gone wrong once in a different project on this
+  account. Don't repeat it here.
+
+### Testing and evaluation
+
+- `estimate_budget()` and the weather date-matching logic
+  (`_closest_forecast_entry()`) both have real test coverage now
+  (`tests/test_budget.py`, `tests/test_weather.py`), mocking `requests.get`
+  the same way `test_attractions.py` does. One behavior the budget tests
+  document rather than fix: `unpriced_categories` only flags a category
+  when *none* of its items have a price, so a mix of priced and unpriced
+  attractions reports a real but incomplete total with no flag. Tighten
+  that on purpose if it ever needs it, don't "fix" it as a side effect of
+  touching something else.
 - `tripcrew/evals/` is a deepeval suite, not promptfoo, chosen over it for
   fitting this project's existing pytest-based testing style rather than a
   second, separate test runner and config format. `TripCrewJudgeLLM`

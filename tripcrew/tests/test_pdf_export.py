@@ -124,6 +124,78 @@ def test_no_restaurants_renders_the_not_available_note_not_a_crash():
     assert "No restaurants available" in text
 
 
+def test_attractions_with_days_render_under_day_headings():
+    plan = TripPlan(
+        destination="Lisbon",
+        days=3,
+        attractions=[
+            Attraction(name="Belem Tower", city="Lisbon", day=1),
+            Attraction(name="Sao Jorge Castle", city="Lisbon", day=2),
+        ],
+    )
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Day 1" in text
+    assert "Day 2" in text
+    assert "Belem Tower" in text
+    assert "Sao Jorge Castle" in text
+
+
+def test_attractions_without_any_day_fall_back_to_a_flat_table():
+    # None of these have a day set -- should render like the original flat
+    # table, not a page-wide "Unscheduled" heading over everything, that
+    # would read as broken rather than as day assignment simply not being
+    # populated for this run.
+    plan = TripPlan(
+        destination="Lisbon",
+        days=3,
+        attractions=[Attraction(name="Belem Tower", city="Lisbon")],
+    )
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Belem Tower" in text
+    assert "Unscheduled" not in text
+    assert "Day 1" not in text
+
+
+def test_attractions_with_a_mix_of_scheduled_and_unscheduled_days():
+    plan = TripPlan(
+        destination="Lisbon",
+        days=3,
+        attractions=[
+            Attraction(name="Belem Tower", city="Lisbon", day=1),
+            Attraction(name="Unplaced Spot", city="Lisbon"),
+        ],
+    )
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Day 1" in text
+    assert "Belem Tower" in text
+    assert "Unscheduled" in text
+    assert "Unplaced Spot" in text
+
+
+def test_restaurants_with_days_render_under_day_headings_and_keep_the_note():
+    plan = TripPlan(
+        destination="Lisbon",
+        days=2,
+        restaurants=[Restaurant(name="Cervejaria Ramiro", city="Lisbon", day=1)],
+    )
+
+    pdf_bytes = build_trip_pdf(plan, write_up="")
+
+    text = PdfReader(BytesIO(pdf_bytes)).pages[0].extract_text()
+    assert "Day 1" in text
+    assert "Cervejaria Ramiro" in text
+    assert "not a rated or curated list" in text
+
+
 def test_special_characters_in_agent_text_do_not_break_rendering():
     # write_up comes from an LLM, attraction names from a live API --
     # reportlab's Paragraph parser treats <, >, & as XML, so unescaped

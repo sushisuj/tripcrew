@@ -10,6 +10,10 @@ Environment setup
    source .venv/bin/activate
    pip install -r requirements.txt
 
+On Windows, activation is ``.venv\Scripts\activate`` (PowerShell/cmd) or
+``source .venv/Scripts/activate`` (Git Bash) instead of the ``bin/activate``
+line above.
+
 Then create a ``.env`` file (never committed -- see ``.env.example`` for the
 shape) with your own API keys:
 
@@ -57,3 +61,14 @@ been separately confirmed, so the workaround in ``agent.py`` (patching
 ``mark_cache_breakpoint`` to a no-op) is left in place regardless of
 provider. Harmless either way, only remove it if this project ever
 switches to an actual Anthropic model.
+
+``streamlit run tripcrew/app.py`` (the command above) needs the ``sys.path``
+fix at the top of ``app.py`` to actually work. Streamlit's own
+``_fix_sys_path()`` only ever adds ``app.py``'s own directory to
+``sys.path``, never the project root one level up that the ``from
+tripcrew.xxx import ...`` lines further down need, confirmed by reading
+Streamlit's ``bootstrap.py`` directly and reproducing the failure with its
+own ``AppTest`` harness. Without that fix, the exact command above fails
+with ``ModuleNotFoundError: No module named 'tripcrew'`` no matter which
+directory it's launched from. If ``app.py`` ever gets restructured, keep
+that fix (or an equivalent) ahead of the ``tripcrew`` imports.

@@ -245,6 +245,59 @@ presentation. Not a new gap, the write-up was always the LLM's own
 retelling rather than grounded data. The PDF's tables are the source of
 truth, the write-up is presentation.
 
+Evaluating and reacting to empty or thin research results
+----------------------------------------------------------
+
+A real London run exposed a gap this section closes: ``get_attractions()``
+came back empty (a since-fixed notability bug, see the section above this
+one), and nothing anywhere reacted to that. The empty list just passed
+straight through ``ItineraryResearch``, ``assemble_trip_plan()``, and the
+presenter, and came out the other end as a write-up that quietly described
+a London trip with no attractions in it, no different in tone from a trip
+where attractions genuinely weren't asked about. The tools already had an
+honest way to report "not available" (an empty list), what was missing was
+anything checking that result and doing something about it.
+
+The fix has two halves, react and evaluate, at two different points in the
+pipeline.
+
+React, inside the tool itself: ``get_attractions()`` and
+``get_restaurants()`` (``tripcrew/tools/``) both try one wider search before
+giving up. ``get_attractions()`` already fell back from a notability-filtered
+search to an unfiltered one for the same destination (see above); now, if
+even that unfiltered search comes back empty, it tries once more at
+``WIDE_SEARCH_RADIUS_METERS`` (25km, up from the normal 10km).
+``get_restaurants()`` has no notability condition to fall back from, but
+gets the same radius-widening react: one retry at 25km if the normal-radius
+search is empty. Both are bounded to a single retry on purpose, this widens
+the search once, it doesn't loop trying to force a result out of a
+destination that may genuinely not have one.
+
+Evaluate, once research is back: ``agent.py``'s ``assemble_trip_plan()``
+calls ``_evaluate_research_gaps()`` after substituting the real
+attractions/restaurants/weather (see "Consolidation can't be trusted..."
+above) and clamping ``day`` values. It checks the real, final lists, not
+what the consolidation task guessed, and flags a category in the new
+``TripPlan.research_gaps`` field whenever it's empty, or -- past
+``THIN_RESEARCH_THRESHOLD`` -- has only a single result. One attraction for
+a whole multi-day trip isn't meaningfully different from zero for planning
+purposes, the same "don't let a number imply completeness it doesn't have"
+rule ``Budget.unpriced_categories`` already applies to price data, applied
+here to a count. Weather is only checked for being empty outright, not
+scored against the threshold, ``WeatherReport.is_approximate`` already
+carries the finer-grained honesty signal for weather.
+
+``research_gaps`` is computed fresh every time, never trusted from any
+task's own output, same reasoning as ``attractions``/``weather``/
+``restaurants`` themselves: a count is a checkable fact once the real
+research is in hand. ``app.py``'s sidebar shows it under a "Research gaps"
+heading once the full crew finishes, the reliable place a traveler actually
+sees it. The presentation task is told to mention it in the write-up too,
+but reads the consolidation task's own (always-empty, at that point in the
+chain) copy of the field, the same timing limitation "Day-by-day
+sequencing" above documents for ``day``: the real evaluation only happens
+after ``crew.kickoff()`` returns, once the presenter has already run.
+
 PDF export
 -------------
 

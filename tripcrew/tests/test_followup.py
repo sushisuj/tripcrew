@@ -68,11 +68,31 @@ def test_attractions_question_lists_names_and_categories():
     assert "tourism.sights" in answer
 
 
+def test_attractions_question_shows_day_when_set():
+    plan = _trip_plan(
+        attractions=[
+            Attraction(name="Belem Tower", city="Lisbon", category="tourism.sights", day=2),
+            Attraction(name="Unplaced Spot", city="Lisbon"),
+        ]
+    )
+    answer = format_answer(plan, TripQuestionIntent(category="attractions"))
+    assert "Day 2: Belem Tower" in answer
+    assert "Unplaced Spot" in answer
+    # The unplaced one shouldn't get a fabricated day label.
+    assert "Day None" not in answer
+
+
 def test_restaurants_question_lists_names_and_categories():
     plan = _trip_plan(restaurants=[Restaurant(name="Cervejaria Ramiro", city="Lisbon", category="catering.restaurant")])
     answer = format_answer(plan, TripQuestionIntent(category="restaurants"))
     assert "Cervejaria Ramiro" in answer
     assert "catering.restaurant" in answer
+
+
+def test_restaurants_question_shows_day_when_set():
+    plan = _trip_plan(restaurants=[Restaurant(name="Cervejaria Ramiro", city="Lisbon", day=1)])
+    answer = format_answer(plan, TripQuestionIntent(category="restaurants"))
+    assert "Day 1: Cervejaria Ramiro" in answer
 
 
 def test_restaurants_question_says_plainly_this_is_not_a_rated_list():

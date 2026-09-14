@@ -11,6 +11,24 @@ see docs/architecture.rst: a manager agent dynamically delegating adds a
 second unreliable decision on top of per-task reliability problems already
 documented on the code-review-crew project. A fixed, predictable pipeline
 is easier to debug when a task's output is wrong.
+
+Process.sequential still governs the task list's order, but the itinerary
+and food research tasks now run concurrently within it (async_execution=True,
+see build_itinerary_task()/build_food_task() and their _from_plan
+counterparts): neither reads the other's output, both only need the intake
+research already on hand, so CrewAI has no real reason to force one to
+finish before the other starts. That's the one genuinely dynamic sequencing
+decision in this file, and it's still code deciding, not an LLM: which
+tasks can run in parallel is fixed by their actual data dependencies (read
+straight off each task's own `context`), not guessed by a manager agent.
+Confirmed directly against CrewAI's own source (crew.py's
+_execute_tasks()/_get_context()), not assumed from the docs: an
+async_execution task's context is read straight off the upstream Task
+object's own `.output` once that task has actually finished, not off a
+positional accumulator, so this is safe regardless of which of the two
+concurrent tasks happens to finish first. See stage_label_for()'s own
+docstring below for the one real consequence of this: task_callback can now
+fire from a background thread, not just crew.kickoff()'s own thread.
 """
 
 import os
@@ -237,6 +255,15 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
     this task's own reasoning about which day suits which attraction used
     to only ever reach the traveler as prose in the final write-up, this
     is that same reasoning captured as data instead.
+
+    async_execution=True: this task and build_food_task()'s only both read
+    intake_task, neither reads the other, so there's no real reason
+    build_crew() has to finish this one before starting food research. See
+    this module's own docstring for why that's safe (CrewAI reads an async
+    task's context straight off the upstream Task object once it's actually
+    finished, not off a positional list), and stage_label_for() below for
+    the one real consequence: this task's own task_callback firing can now
+    happen from a background thread.
     """
     return Task(
         description=(
@@ -269,6 +296,7 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
         agent=agent,
         context=[intake_task],
         output_pydantic=ItineraryResearch,
+        async_execution=True,
     )
 
 
@@ -333,6 +361,12 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     below instead of "the trip's total number of days" the way
     build_itinerary_task has to phrase it, since this variant already has
     the real value on hand.
+
+    async_execution=True, same reasoning as build_itinerary_task -- even
+    simpler here, this task has no `context` at all (everything it needs is
+    already baked into the description above), so there's no context chain
+    to reason about, nothing for a concurrently-running build_food_task_from_plan()
+    to race against.
     """
     date_range = _trip_date_range(intake_plan)
     return Task(
@@ -368,6 +402,7 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
         ),
         agent=agent,
         output_pydantic=ItineraryResearch,
+        async_execution=True,
     )
 
 
@@ -386,6 +421,11 @@ def build_food_task(agent: Agent, intake_task: Task) -> Task:
     Attraction.day (schemas.py), but this agent has no weather signal to
     reason from the way the itinerary agent does, so its job is just an
     even spread across the trip's days, not weather-aware sequencing.
+
+    async_execution=True: same reasoning as build_itinerary_task's own
+    async_execution note. This task and build_itinerary_task() both only
+    read intake_task, neither reads the other, so build_crew() runs them
+    concurrently instead of forcing one to wait on the other.
     """
     return Task(
         description=(
@@ -414,6 +454,7 @@ def build_food_task(agent: Agent, intake_task: Task) -> Task:
         agent=agent,
         context=[intake_task],
         output_pydantic=FoodResearch,
+        async_execution=True,
     )
 
 
@@ -425,6 +466,9 @@ def build_food_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
 
     output_pydantic=FoodResearch, same reasoning as build_food_task,
     including day assignment with the real day count baked in below.
+
+    async_execution=True, same reasoning as build_itinerary_task_from_plan's
+    own note: no `context` here either, nothing to race against.
     """
     date_range = _trip_date_range(intake_plan)
     return Task(
@@ -455,6 +499,7 @@ def build_food_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
         ),
         agent=agent,
         output_pydantic=FoodResearch,
+        async_execution=True,
     )
 
 
@@ -620,9 +665,19 @@ def build_crew(
     task_callback is Crew's own hook (confirmed via the installed crewai
     source, crew.py/task.py: fires once per task, right after that task
     finishes, called as task_callback(task.output)), not something bolted
-    on here. Process.sequential guarantees tasks complete in list order, so
-    app.py can count calls against a fixed stage-label list to build a live
-    step indicator without CrewAI needing to know anything about Streamlit.
+    on here. It used to be safe for app.py to count calls against a fixed
+    stage-label list, back when every task ran strictly one after another --
+    not true any more now that itinerary and food research run concurrently
+    (async_execution=True, see build_itinerary_task()'s own docstring):
+    whichever of the two actually finishes first fires first, and
+    task_callback fires from that task's own background thread, not
+    crew.kickoff()'s thread. Two real consequences: don't count calls by
+    position any more, match each call's task_output.pydantic type instead
+    (stage_label_for() below does this); and don't call a UI framework's
+    widget methods directly from inside task_callback, a background thread
+    touching Streamlit state isn't safe. app.py records what
+    stage_label_for() returns into a plain list instead, and only writes it
+    to the status widget after kickoff() returns, back on the main thread.
     Not wrapped in a try/except here on purpose -- app.py's callback is
     responsible for not raising, a UI update failing should never be able
     to take the actual crew run down with it.
@@ -663,6 +718,113 @@ def build_crew(
         verbose=True,
         task_callback=task_callback,
     )
+
+
+# Maps a finished task's own structured output type to what app.py's status
+# widget should show for it, in reading order. Keyed by type rather than by
+# call position, see build_crew()'s own task_callback paragraph for why:
+# itinerary and food research run concurrently now, so whichever finishes
+# first fires task_callback first, position no longer reliably identifies
+# which task just completed the way it did when every task ran strictly one
+# after another.
+STAGE_LABELS_BY_OUTPUT_TYPE: list[tuple[type, str]] = [
+    (ItineraryResearch, "Researching attractions & weather"),
+    (FoodResearch, "Researching restaurants & cafes"),
+    (TripPlan, "Consolidating the plan & budget"),
+]
+
+# The presentation task has no output_pydantic (it's free-text), so its
+# TaskOutput.pydantic is always None -- stage_label_for() checks for that
+# explicitly rather than adding a fourth (type, label) pair above, None
+# isn't a type STAGE_LABELS_BY_OUTPUT_TYPE's isinstance check can match on.
+PRESENTATION_STAGE_LABEL = "Writing it up"
+
+# app.py's own canonical reading order for the status widget: research
+# first (regardless of which of the two concurrent tasks actually finished
+# first), then consolidation, then the write-up. Derived from
+# STAGE_LABELS_BY_OUTPUT_TYPE rather than duplicated by hand, so the two
+# can't drift out of sync with each other.
+PLANNING_STAGE_LABELS = [label for _, label in STAGE_LABELS_BY_OUTPUT_TYPE] + [PRESENTATION_STAGE_LABEL]
+
+
+def stage_label_for(task_output: TaskOutput) -> str | None:
+    """Maps one finished build_crew(intake_plan=...) task's own output to a
+    PLANNING_STAGE_LABELS entry, by the type of task_output.pydantic --
+    same "check what the output actually is, don't assume position or
+    order" instinct as assemble_trip_plan()'s own isinstance-based lookups,
+    applied here because async_execution (see build_itinerary_task()'s
+    docstring) means task_callback's call order is no longer guaranteed to
+    match build_crew()'s task list order.
+
+    Returns None for a task_output this crew shouldn't ever actually
+    produce (not one of the three research-or-consolidation types, and not
+    the presentation task's typeless output either) -- defensive, not
+    expected to trigger in normal operation, but a label lookup failing
+    should never be the reason a UI callback raises (see build_crew()'s own
+    task_callback paragraph: that callback is required not to raise).
+    """
+    for output_type, label in STAGE_LABELS_BY_OUTPUT_TYPE:
+        if isinstance(task_output.pydantic, output_type):
+            return label
+    if task_output.pydantic is None:
+        return PRESENTATION_STAGE_LABEL
+    return None
+
+
+def extract_reasoning(task_output: TaskOutput) -> list[str]:
+    """Pulls the agent's own free-text reasoning out of a finished task,
+    the actual reasoning trail this project didn't capture anywhere before.
+
+    Not task_output.raw: for a task with output_pydantic set (itinerary_task,
+    food_task, consolidation_task, all three of build_crew(intake_plan=...)'s
+    research/consolidation stages), .raw is just that structured output's
+    own JSON dump, confirmed by reading crewai's task.py (_execute_core:
+    `raw = result.model_dump_json()` once the executor's result is already a
+    BaseModel) -- not the agent's reasoning about how it got there, the same
+    data again in a different format. task_output.messages is where the
+    actual reasoning survives: the real conversation transcript for that
+    task (confirmed via crewai's agent/utils.py, save_last_messages()),
+    including any free text the agent wrote before or between tool calls,
+    the tool calls themselves, and the tools' own results.
+
+    This returns only the assistant role's own text content, in call order,
+    skipping any message with no text -- a pure tool call, or a tool's
+    result message, isn't the agent's reasoning, it's a mechanical step.
+    What's left is the closest thing to "why did it decide this" this
+    project can surface without inventing an explanation.
+
+    Not verified against anything, same caveat CLAUDE.md already documents
+    for the presentation task's write-up: this is the agent's own
+    unverified retelling of its process, shown for transparency, not
+    trusted as fact the way TripPlan's own fields are. Never fold this into
+    TripPlan or any other schema meant to be trustworthy, it stays outside
+    that boundary on purpose, see reasoning_entry_for()'s own docstring.
+    """
+    return [
+        content
+        for message in task_output.messages
+        if message.get("role") == "assistant"
+        and isinstance((content := message.get("content")), str)
+        and content.strip()
+    ]
+
+
+def reasoning_entry_for(task_output: TaskOutput) -> tuple[str, list[str]] | None:
+    """Pairs stage_label_for(task_output) with extract_reasoning(task_output)
+    for one finished task, so app.py's task_callback records a label and its
+    reasoning as a single unit -- calling the two separately risked a label
+    from one call getting paired with reasoning from another once itinerary
+    and food research started finishing in whichever order they actually
+    complete (see stage_label_for()'s own docstring).
+
+    Returns None under the same condition stage_label_for() does (an
+    unrecognized output type), for the same reason: a lookup failing here
+    should never be the reason app.py's task_callback raises.
+    """
+    label = stage_label_for(task_output)
+    if label is None:
+        return None
+    return label, extract_reasoning(task_output)
 
 
 def build_intake_crew() -> Crew:

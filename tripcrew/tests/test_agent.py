@@ -22,6 +22,13 @@ schemas.py), so they're not restated the way attractions/weather/restaurants
 themselves are, but they can still be wrong the way any model output can,
 so anything outside 1..TripPlan.days gets reset to None rather than shown
 as, say, "Day 7" on a 3-day trip.
+
+And the research_gaps half: once attractions/restaurants/weather are the
+real substituted values, assemble_trip_plan() evaluates them for empty or
+thin results and reports each one in TripPlan.research_gaps, the "evaluate"
+step that was missing when a real London run had attractions come back
+empty and nothing downstream reacted to it (see _evaluate_research_gaps()'s
+own docstring in agent.py).
 """
 
 from dataclasses import dataclass
@@ -202,6 +209,117 @@ def test_assemble_trip_plan_leaves_a_valid_day_alone():
     assert plan is not None
     assert plan.attractions[0].day == 3
     assert plan.restaurants[0].day is None
+
+
+def test_assemble_trip_plan_flags_empty_attractions_and_restaurants_as_research_gaps():
+    # The real bug this closes: a London run had get_attractions() come back
+    # empty and nothing downstream reacted to it, the write-up just quietly
+    # described a trip with no attractions in it. research_gaps is what
+    # makes that visible instead of silent.
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[],
+        weather=[WeatherReport(city="London", date="2026-09-01", summary="Light rain, 22C")],
+    )
+    real_food = FoodResearch(restaurants=[])
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=real_food),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan is not None
+    assert any("Attractions" in gap and "no results found" in gap for gap in plan.research_gaps)
+    assert any("Restaurants" in gap and "no results found" in gap for gap in plan.research_gaps)
+    assert not any(gap.startswith("Weather") for gap in plan.research_gaps)
+
+
+def test_assemble_trip_plan_flags_a_single_result_as_thin_not_just_zero():
+    # One attraction and one restaurant for a whole trip isn't meaningfully
+    # different from zero for planning purposes -- THIN_RESEARCH_THRESHOLD
+    # exists so this gets flagged the same as an outright empty list.
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[Attraction(name="Tower of London", city="London")],
+        weather=[WeatherReport(city="London", date="2026-09-01", summary="Light rain, 22C")],
+    )
+    real_food = FoodResearch(restaurants=[Restaurant(name="Dishoom", city="London")])
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=real_food),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert any("Attractions" in gap and "only 1 result found" in gap for gap in plan.research_gaps)
+    assert any("Restaurants" in gap and "only 1 result found" in gap for gap in plan.research_gaps)
+
+
+def test_assemble_trip_plan_reports_no_gaps_once_theres_enough_of_everything():
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[
+            Attraction(name="Tower of London", city="London"),
+            Attraction(name="British Museum", city="London"),
+        ],
+        weather=[WeatherReport(city="London", date="2026-09-01", summary="Light rain, 22C")],
+    )
+    real_food = FoodResearch(
+        restaurants=[
+            Restaurant(name="Dishoom", city="London"),
+            Restaurant(name="Borough Market", city="London"),
+        ]
+    )
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=real_food),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan.research_gaps == []
+
+
+def test_assemble_trip_plan_flags_missing_weather_as_a_research_gap_too():
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[
+            Attraction(name="Tower of London", city="London"),
+            Attraction(name="British Museum", city="London"),
+        ],
+        weather=[],
+    )
+    real_food = FoodResearch(
+        restaurants=[
+            Restaurant(name="Dishoom", city="London"),
+            Restaurant(name="Borough Market", city="London"),
+        ]
+    )
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=real_food),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan.research_gaps == ["Weather: no forecast could be found for London."]
 
 
 def test_itinerary_tasks_use_itinerary_research_as_output_type():

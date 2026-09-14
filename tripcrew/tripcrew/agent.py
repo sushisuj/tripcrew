@@ -552,6 +552,15 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
     write-up's sequencing was always the LLM's own retelling rather than
     grounded data, same as the whole reason assemble_trip_plan() exists.
     The write-up is presentation, the PDF's tables are the source of truth.
+
+    Same caveat applies to research_gaps: this task reads the consolidation
+    task's own (empty, at this point in the chain) copy of that field, not
+    assemble_trip_plan()'s real evaluation, since that evaluation also only
+    runs after crew.kickoff() returns. The instruction below tells the
+    agent to mention it anyway on the chance a future consolidation
+    variant populates it, but app.py's sidebar (render_sidebar()) is the
+    reliable place a traveler actually sees research_gaps today, not this
+    write-up.
     """
     return Task(
         description=(
@@ -568,12 +577,16 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
             "attraction or restaurant has a day set, structure the write-up "
             "around those days (Day 1, Day 2, and so on); if day isn't set "
             "for something, mention it without forcing it onto a day you're "
-            "not confident about."
+            "not confident about. If research_gaps isn't empty, mention "
+            "each one plainly (for example, say attractions came back empty "
+            "for the destination), don't quietly describe whatever's left "
+            "as if it were the complete picture."
         ),
         expected_output=(
             "A readable trip plan write-up covering flights, hotel, "
             "attractions, restaurants, weather, and budget, organized by "
-            "day wherever the plan's own day fields support that."
+            "day wherever the plan's own day fields support that, and "
+            "naming any research gap plainly rather than glossing over it."
         ),
         agent=agent,
         context=[consolidation_task],
@@ -710,6 +723,13 @@ def assemble_trip_plan(result: CrewOutput) -> TripPlan | None:
     wrong the same way it could invent anything else, and TripPlan.days is
     known for certain by this point, so any day outside 1..days gets reset
     to None here rather than shown as, say, "Day 7" on a 3-day trip.
+
+    Also overwrites TripPlan.research_gaps with a fresh evaluation of the
+    real, substituted attractions/restaurants/weather (see
+    _evaluate_research_gaps()), same reasoning as everything else this
+    function overwrites: a count of what's actually in the final lists is a
+    checkable fact once those lists are the real ones, not something to
+    trust the consolidation task's own guess about.
     """
     consolidated_plan = next(
         (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
@@ -736,7 +756,82 @@ def assemble_trip_plan(result: CrewOutput) -> TripPlan | None:
     _clamp_invalid_days(consolidated_plan.attractions, consolidated_plan.days)
     _clamp_invalid_days(consolidated_plan.restaurants, consolidated_plan.days)
 
+    consolidated_plan.research_gaps = _evaluate_research_gaps(consolidated_plan)
+
     return consolidated_plan
+
+
+# Below this count, attractions/restaurants get flagged as a research gap
+# even when non-empty. One or two results for a whole trip isn't meaningfully
+# different from zero for planning purposes, it just fails silently instead
+# of loudly -- the same honesty rule Budget.unpriced_categories applies to a
+# price gets applied here to a count. Chosen as a low, deliberately
+# conservative bar: this should catch "the tool basically came up empty," not
+# flag every small destination that genuinely only has a handful of notable
+# places.
+THIN_RESEARCH_THRESHOLD = 2
+
+
+def _evaluate_research_gaps(plan: TripPlan) -> list[str]:
+    """The "evaluate" half of reacting to a bad tool result, run once the
+    plan's attractions/restaurants/weather are the real, substituted values
+    (see assemble_trip_plan(), which calls this after the substitution and
+    day-clamping above). The "react" half already happened inside
+    get_attractions()/get_restaurants() themselves -- both widen their
+    search radius once before giving up, see WIDE_SEARCH_RADIUS_METERS in
+    tripcrew/tools/attractions.py and restaurants.py. This is what's left to
+    do once that's exhausted and a category is still empty or thin: say so,
+    plainly, instead of letting an empty or near-empty list pass silently
+    into the write-up and the PDF as if that were the whole story.
+
+    This exists because of a real gap, not a hypothetical one: a London run
+    had get_attractions() come back empty (since fixed, see
+    NOTABILITY_CONDITION's own docstring for the wrong-municipality bug that
+    caused it), and nothing anywhere reacted to that -- the write-up just
+    quietly described a London trip with no attractions in it, no different
+    in tone from a trip where attractions genuinely weren't asked about.
+    TripPlan.research_gaps is what closes that: something a caller (the
+    presentation task, app.py's sidebar) can check and actually say out
+    loud.
+
+    Weather isn't scored against THIN_RESEARCH_THRESHOLD the way attractions
+    and restaurants are -- a handful of forecast entries covering a trip's
+    real dates is normal and complete, not thin, so this only checks whether
+    the list is empty outright. WeatherReport.is_approximate already carries
+    the finer-grained honesty signal for weather, per forecast entry, that
+    this function handles as a threshold for the other two.
+    """
+    gaps = []
+
+    attraction_count = len(plan.attractions)
+    if attraction_count < THIN_RESEARCH_THRESHOLD:
+        gaps.append(
+            f"Attractions: {_gap_phrase(attraction_count)} for {plan.destination}, "
+            "even after widening the search."
+        )
+
+    restaurant_count = len(plan.restaurants)
+    if restaurant_count < THIN_RESEARCH_THRESHOLD:
+        gaps.append(
+            f"Restaurants: {_gap_phrase(restaurant_count)} for {plan.destination}, "
+            "even after widening the search."
+        )
+
+    if not plan.weather:
+        gaps.append(f"Weather: no forecast could be found for {plan.destination}.")
+
+    return gaps
+
+
+def _gap_phrase(count: int) -> str:
+    """'no results found' for zero, 'only N result(s) found' for a thin but
+    non-empty count -- shared wording between the attractions and
+    restaurants gap messages in _evaluate_research_gaps() so the two don't
+    drift out of sync with each other.
+    """
+    if count == 0:
+        return "no results found"
+    return f"only {count} result{'s' if count != 1 else ''} found"
 
 
 def _clamp_invalid_days(items: list, days: int) -> None:

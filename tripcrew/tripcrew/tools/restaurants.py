@@ -43,6 +43,13 @@ RESTAURANT_CATEGORIES = "catering.restaurant,catering.cafe,catering.fast_food"
 # wider or narrower area than sightseeing search.
 SEARCH_RADIUS_METERS = 10000
 
+# Same widen-once react as attractions.py's WIDE_SEARCH_RADIUS_METERS, tried
+# only if the normal-radius search comes back empty -- get_restaurants() has
+# no notability condition to fall back from, but geography is still worth
+# one more try before reporting nothing found. Same value, same reasoning:
+# widen once, don't loop chasing a result a destination may genuinely not have.
+WIDE_SEARCH_RADIUS_METERS = 25000
+
 
 class RestaurantsUnavailable(Exception):
     """Raised for any condition that means restaurants can't be looked up
@@ -66,10 +73,14 @@ def _geocode(city: str, api_key: str) -> tuple[float, float]:
         raise RestaurantsUnavailable(f"Geocoding request failed for {city}: {e}") from e
 
 
-def _fetch_places(lat: float, lon: float, api_key: str, limit: int) -> list[dict]:
+def _fetch_places(lat: float, lon: float, api_key: str, limit: int, radius_meters: int = SEARCH_RADIUS_METERS) -> list[dict]:
+    """One Places API call. radius_meters defaults to the normal search
+    radius; get_restaurants() passes WIDE_SEARCH_RADIUS_METERS explicitly
+    for its one widen-and-retry attempt.
+    """
     params = {
         "categories": RESTAURANT_CATEGORIES,
-        "filter": f"circle:{lon},{lat},{SEARCH_RADIUS_METERS}",
+        "filter": f"circle:{lon},{lat},{radius_meters}",
         "limit": limit,
         "apiKey": api_key,
     }
@@ -97,11 +108,20 @@ def get_restaurants(city: str, limit: int = 5) -> list[Restaurant]:
     Attraction: Geoapify doesn't return price data, so the budget tool
     should treat it as unknown, not zero.
 
+    If the normal-radius search comes back empty, this reacts once more by
+    widening to WIDE_SEARCH_RADIUS_METERS before reporting nothing found --
+    same react step get_attractions() applies to its own last-resort
+    unfiltered search, for the same reason: a genuinely empty result
+    deserves one more real attempt, not just a pass-through "not available."
+
     Returns an empty list if a real lookup can't be produced right now
-    (missing API key, geocoding failure, Places request failure). Same
-    reasoning as get_attractions and get_weather: an empty list already
-    means "not available" in this schema, and the itinerary/food task is
-    told not to invent restaurants to fill the gap.
+    (missing API key, geocoding failure, Places request failure) or if both
+    attempts above still come back empty. Same reasoning as get_attractions
+    and get_weather: an empty list already means "not available" in this
+    schema, and the itinerary/food task is told not to invent restaurants to
+    fill the gap. agent.py's assemble_trip_plan() is what evaluates a
+    genuinely empty result and reports it in TripPlan.research_gaps rather
+    than letting it pass through silently.
     """
     api_key = os.getenv("GEOAPIFY_API_KEY")
     if not api_key:
@@ -110,6 +130,8 @@ def get_restaurants(city: str, limit: int = 5) -> list[Restaurant]:
     try:
         lat, lon = _geocode(city, api_key)
         features = _fetch_places(lat, lon, api_key, limit)
+        if not features:
+            features = _fetch_places(lat, lon, api_key, limit, radius_meters=WIDE_SEARCH_RADIUS_METERS)
     except (RestaurantsUnavailable, requests.RequestException, KeyError):
         return []
 

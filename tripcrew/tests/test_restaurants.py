@@ -3,14 +3,16 @@
 Same mocking approach as test_attractions.py: mock requests.get so the
 request-building and response-parsing logic is checked without a live
 Geoapify call. No notability-fallback tests here, unlike attractions --
-get_restaurants() only ever makes one Places request, see its own
-docstring for why a notable-first request doesn't make sense for food.
+get_restaurants() only ever makes at most two Places requests (normal
+radius, then a widened one if that came back empty, see
+WIDE_SEARCH_RADIUS_METERS), never a notable-first request, see its own
+docstring for why that doesn't make sense for food.
 """
 
 import os
 from unittest.mock import MagicMock, patch
 
-from tripcrew.tools.restaurants import get_restaurants
+from tripcrew.tools.restaurants import SEARCH_RADIUS_METERS, WIDE_SEARCH_RADIUS_METERS, get_restaurants
 
 
 def _geocode_response():
@@ -52,15 +54,43 @@ def test_request_filters_on_restaurant_categories_with_no_notability_condition()
 
 
 @patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
-def test_no_fallback_request_when_the_places_search_comes_back_empty():
-    # Unlike get_attractions, there's no unfiltered-fallback request to
-    # make -- an empty category-filtered result just means "not available".
+def test_no_notability_fallback_request_when_the_places_search_comes_back_empty():
+    # Unlike get_attractions, there's no notability-condition fallback to
+    # make -- an empty category-filtered result at the normal radius goes
+    # straight to the radius-widening react instead (see the next test).
     with patch("tripcrew.tools.restaurants.requests.get") as mock_get:
-        mock_get.side_effect = [_geocode_response(), _places_response([])]
+        mock_get.side_effect = [_geocode_response(), _places_response([]), _places_response([])]
         result = get_restaurants.func(city="Smalltown")
 
-    assert mock_get.call_count == 2
+    assert mock_get.call_count == 3
     assert result == []
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_normal_radius_search_uses_the_normal_radius():
+    with patch("tripcrew.tools.restaurants.requests.get") as mock_get:
+        mock_get.side_effect = [_geocode_response(), _places_response([_feature("Cervejaria Ramiro")])]
+        get_restaurants.func(city="Lisbon")
+
+    places_call = mock_get.call_args_list[1]
+    assert f"circle:-9.1,38.7,{SEARCH_RADIUS_METERS}" == places_call.kwargs["params"]["filter"]
+    assert mock_get.call_count == 2
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_widens_the_radius_once_when_the_normal_radius_search_is_empty():
+    with patch("tripcrew.tools.restaurants.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _geocode_response(),
+            _places_response([]),  # normal radius: nothing
+            _places_response([_feature("Roadside Diner")]),  # widened radius: found something
+        ]
+        result = get_restaurants.func(city="Sparsetown")
+
+    assert mock_get.call_count == 3
+    widened_call = mock_get.call_args_list[2]
+    assert f"circle:-9.1,38.7,{WIDE_SEARCH_RADIUS_METERS}" == widened_call.kwargs["params"]["filter"]
+    assert [r.name for r in result] == ["Roadside Diner"]
 
 
 @patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})

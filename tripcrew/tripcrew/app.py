@@ -24,6 +24,7 @@ panel, not a second source of truth.
 
 import os
 import sys
+import threading
 
 # streamlit run tripcrew/app.py only ever adds THIS file's own directory
 # (tripcrew/tripcrew/) to sys.path -- confirmed by reading Streamlit's own
@@ -47,7 +48,13 @@ if _PROJECT_ROOT not in sys.path:
 import streamlit as st
 from dotenv import load_dotenv
 
-from tripcrew.agent import assemble_trip_plan, build_crew, build_intake_crew
+from tripcrew.agent import (
+    PLANNING_STAGE_LABELS,
+    assemble_trip_plan,
+    build_crew,
+    build_intake_crew,
+    reasoning_entry_for,
+)
 from tripcrew.followup import answer_trip_question
 from tripcrew.pdf_export import build_trip_pdf
 
@@ -253,6 +260,17 @@ else:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
+        # Only a finished full-crew run's message ever carries this (see
+        # the `if prompt:` block below), replayed the same collapsed,
+        # clearly-unverified way, one expander per stage that had it, it
+        # was shown the turn it was produced.
+        reasoning_trail = message.get("reasoning_trail", [])
+        if reasoning_trail:
+            with st.expander("How the agent got here (unverified reasoning)"):
+                for label, reasoning in reasoning_trail:
+                    st.markdown(f"**{label}**")
+                    for line in reasoning:
+                        st.write(line)
 
 prompt = st.chat_input("Ask about your trip..." if st.session_state.trip_write_up else "Plan a trip...")
 
@@ -260,6 +278,12 @@ if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
+
+    # Only the full-crew branch below ever populates this -- a follow-up
+    # question and the "still need more info" branch both have no crew run
+    # to draw reasoning from, so this stays empty for them, same as if
+    # reasoning_trail were never mentioned in those branches at all.
+    reasoning_trail: list[tuple[str, list[str]]] = []
 
     with st.chat_message("assistant"):
         if st.session_state.trip_write_up:
@@ -285,50 +309,66 @@ if prompt:
                 )
                 st.write(response)
             else:
-                # A live step indicator, not just a spinner. build_crew(intake_plan=...)
+                # A step indicator, not just a spinner. build_crew(intake_plan=...)
                 # runs itinerary research, food research, consolidation, and
-                # presentation in that fixed order (Process.sequential), so
-                # task_callback firing once per completed task can be counted
-                # against STAGE_LABELS below to know which stage just finished
-                # -- CrewAI's own hook (confirmed in its source:
-                # crew_task_callback fires as task.callback(task.output)
-                # right after each task completes), nothing bolted on. kickoff()
-                # is a normal blocking call, so this callback runs synchronously
-                # from inside it; calling .write() on the status object we already
-                # hold updates the same widget immediately, no rerun needed, the
-                # same mechanism st.progress() and st.status() are built for.
-                #
-                # Four entries, matching build_crew(intake_plan=...)'s four
-                # tasks exactly -- this list has to track that task count, or
-                # a stage silently stops showing (see mark_stage_done's own
-                # `i < len(STAGE_LABELS)` guard) and the real last task's
-                # completion never gets its checkmark.
-                STAGE_LABELS = [
-                    "Researching attractions & weather",
-                    "Researching restaurants & cafes",
-                    "Consolidating the plan & budget",
-                    "Writing it up",
-                ]
+                # presentation -- but itinerary and food research now run
+                # concurrently (async_execution=True, see build_itinerary_task()'s
+                # docstring in agent.py), so task_callback can fire from either
+                # one's own background thread, in whichever order they actually
+                # finish, not necessarily in build_crew()'s task-list order any
+                # more. Two consequences, both explained in build_crew()'s own
+                # task_callback paragraph: reasoning_entry_for() identifies which
+                # stage just finished by its output's real type instead of by
+                # call position, and mark_stage_done() below only ever appends
+                # to plain lists -- it never touches `status` itself, a
+                # background thread calling a Streamlit widget method isn't
+                # safe. The recorded stages (and their reasoning, see below)
+                # get written to `status` afterward, back on this (the main)
+                # thread, once kickoff() has returned and every task --
+                # concurrent or not -- has actually finished.
                 with st.status("Planning the full trip...", expanded=True) as status:
-                    stage_count = {"done": 0}
+                    completed_stages: list[str] = []
+                    reasoning_by_stage: dict[str, list[str]] = {}
+                    completed_lock = threading.Lock()
 
                     def mark_stage_done(task_output):
-                        # Deliberately swallows everything -- a failure updating
-                        # the status widget must never be able to take the real
+                        # Deliberately swallows everything -- a failure recording
+                        # a finished stage must never be able to take the real
                         # crew run down with it (build_crew()'s task_callback
                         # isn't wrapped in try/except itself, this is where that
-                        # safety has to live instead).
+                        # safety has to live instead). The lock only guards the
+                        # two dict/list writes: two of this crew's tasks can
+                        # call this from two different background threads at
+                        # close to the same moment. reasoning_entry_for() pairs
+                        # a stage label with that same task's own reasoning
+                        # (agent.py's extract_reasoning(), the actual "how did
+                        # it get here" trail this project didn't capture
+                        # anywhere before) so the two can't end up mismatched.
                         try:
-                            i = stage_count["done"]
-                            if i < len(STAGE_LABELS):
-                                status.write(f"✓ {STAGE_LABELS[i]}")
-                            stage_count["done"] += 1
+                            entry = reasoning_entry_for(task_output)
+                            if entry is not None:
+                                label, reasoning = entry
+                                with completed_lock:
+                                    completed_stages.append(label)
+                                    reasoning_by_stage[label] = reasoning
                         except Exception:
                             pass
 
                     result = build_crew(intake_plan=draft_plan, task_callback=mark_stage_done).kickoff(
                         inputs={"request": st.session_state.conversation}
                     )
+
+                    # Rendered in PLANNING_STAGE_LABELS' fixed reading order,
+                    # not completed_stages' own append order -- research
+                    # finishing in a different order between runs (itinerary
+                    # before food, or the reverse) is real and honest, but
+                    # showing the checklist itself in a different order every
+                    # run would just read as visually inconsistent for no
+                    # benefit, nothing downstream cares which of the two
+                    # concurrent tasks happened to finish first.
+                    for label in PLANNING_STAGE_LABELS:
+                        if label in completed_stages:
+                            status.write(f"✓ {label}")
                     status.update(label="Trip planned", state="complete")
 
                 # kickoff()'s own .pydantic is the LAST task's output (the
@@ -354,7 +394,39 @@ if prompt:
                 st.session_state.trip_write_up = response
                 st.write(response)
 
-    st.session_state.messages.append({"role": "assistant", "content": response})
+                # The reasoning trail: each stage's own free-text reasoning
+                # (agent.py's extract_reasoning(), pulled from the real
+                # conversation transcript, not the structured output), shown
+                # collapsed and clearly labeled as unverified -- it's the
+                # agent's own retelling of its process, not data TripPlan's
+                # other fields can be trusted the way. Same PLANNING_STAGE_LABELS
+                # order as the status widget above, skipping any stage that
+                # genuinely had no reasoning text (a task can call a tool with
+                # no text around it at all). Built here, not in
+                # render_sidebar(), so it stays attached to the message that
+                # produced it in st.session_state.messages below rather than
+                # floating in the sidebar disconnected from which trip it
+                # belongs to.
+                reasoning_trail = [
+                    (label, reasoning_by_stage[label])
+                    for label in PLANNING_STAGE_LABELS
+                    if reasoning_by_stage.get(label)
+                ]
+                if reasoning_trail:
+                    with st.expander("How the agent got here (unverified reasoning)"):
+                        for label, reasoning in reasoning_trail:
+                            st.markdown(f"**{label}**")
+                            for line in reasoning:
+                                st.write(line)
+
+    assistant_message = {"role": "assistant", "content": response}
+    if reasoning_trail:
+        # Stays unset (the key is simply absent) for a follow-up question or
+        # a still-need-more-info reply -- reasoning_trail only ever gets
+        # populated by the full-crew branch above, see its own comment.
+        # The replay loop below checks with .get() for exactly this reason.
+        assistant_message["reasoning_trail"] = reasoning_trail
+    st.session_state.messages.append(assistant_message)
 
 # Rendered last on purpose: session_state.trip_plan may have just been
 # updated above, in the if prompt: block, on this exact rerun. Streamlit

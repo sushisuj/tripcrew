@@ -32,6 +32,7 @@ fire from a background thread, not just crew.kickoff()'s own thread.
 """
 
 import os
+import re
 from datetime import date, timedelta
 from typing import Callable
 
@@ -892,6 +893,23 @@ def assemble_trip_plan(result: CrewOutput) -> TripPlan | None:
     function overwrites: a count of what's actually in the final lists is a
     checkable fact once those lists are the real ones, not something to
     trust the consolidation task's own guess about.
+
+    Also strips any "(approximate)" text the itinerary LLM wrote directly
+    into WeatherReport.summary (see _strip_approximate_marker()). Routing
+    weather through itinerary_research instead of the consolidation task's
+    retelling (above) fixed the case where the *consolidation* task
+    re-authored a clean summary into a corrupted one, but it doesn't
+    guarantee itinerary_research.weather itself is clean: the real London
+    run that motivated this docstring's own doubled-marker example
+    ("Light rain, ~22C (approximate) (approximate)") happened with that
+    fix already in place, proving the itinerary task's own structured
+    output can add "(approximate)" on its own despite being told to copy
+    get_weather()'s text verbatim, which then doubles up with
+    pdf_export.py's own unconditional append for any
+    WeatherReport.is_approximate entry. Same "don't trust prompt wording
+    for something this easy to sanitize in code" rule as
+    _clamp_invalid_days() above, just applied to text instead of a day
+    number.
     """
     consolidated_plan = next(
         (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
@@ -907,6 +925,7 @@ def assemble_trip_plan(result: CrewOutput) -> TripPlan | None:
     if itinerary_research is not None:
         consolidated_plan.attractions = itinerary_research.attractions
         consolidated_plan.weather = itinerary_research.weather
+        _strip_approximate_marker(consolidated_plan.weather)
 
     food_research = next(
         (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, FoodResearch)),
@@ -994,6 +1013,30 @@ def _gap_phrase(count: int) -> str:
     if count == 0:
         return "no results found"
     return f"only {count} result{'s' if count != 1 else ''} found"
+
+
+_APPROXIMATE_MARKER = re.compile(r"\(approximate\)", re.IGNORECASE)
+
+
+def _strip_approximate_marker(reports: list) -> None:
+    """Removes any "(approximate)" text baked directly into
+    WeatherReport.summary, in place, whether it appears once or (the real
+    corruption case this exists for) twice.
+
+    pdf_export.py already appends " (approximate)" on its own, correctly,
+    for any report where is_approximate is True -- that's the single
+    intended source of that text. This exists because the itinerary task's
+    own structured output isn't guaranteed to leave summary alone despite
+    being told to copy get_weather()'s text verbatim (see
+    assemble_trip_plan()'s own docstring for the confirmed real case). Left
+    unhandled, the itinerary LLM's own copy plus pdf_export.py's append is
+    how a real PDF ended up with "Light rain, ~22C (approximate)
+    (approximate)".
+    """
+    for report in reports:
+        if _APPROXIMATE_MARKER.search(report.summary):
+            cleaned = _APPROXIMATE_MARKER.sub("", report.summary)
+            report.summary = re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _clamp_invalid_days(items: list, days: int) -> None:

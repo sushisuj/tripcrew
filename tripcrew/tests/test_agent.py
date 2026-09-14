@@ -238,6 +238,84 @@ def test_assemble_trip_plan_leaves_a_valid_day_alone():
     assert plan.restaurants[0].day is None
 
 
+def test_assemble_trip_plan_strips_a_doubled_approximate_marker_from_weather():
+    # Regression test for the actual real-PDF bug: the itinerary task's own
+    # structured output (not just the consolidation task's retelling this
+    # file's other tests already cover) can independently add
+    # "(approximate)" to a summary despite being told to copy get_weather()'s
+    # text verbatim. That plus pdf_export.py's own append is how a real PDF
+    # ended up with "Light rain, ~22C (approximate) (approximate)".
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[],
+        weather=[
+            WeatherReport(
+                city="London",
+                date="2026-09-01",
+                summary="Light rain, ~22C (approximate) (approximate)",
+                is_approximate=True,
+            )
+        ],
+    )
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan.weather[0].summary == "Light rain, ~22C"
+    assert plan.weather[0].is_approximate is True
+
+
+def test_assemble_trip_plan_strips_a_single_approximate_marker_from_weather():
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[],
+        weather=[
+            WeatherReport(
+                city="Lisbon",
+                date="2026-10-01",
+                summary="clear sky, 21.69C (approximate)",
+                is_approximate=True,
+            )
+        ],
+    )
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan.weather[0].summary == "clear sky, 21.69C"
+
+
+def test_assemble_trip_plan_leaves_a_clean_weather_summary_alone():
+    consolidation_output = _corrupted_consolidation_plan()
+    real_itinerary = ItineraryResearch(
+        attractions=[],
+        weather=[WeatherReport(city="Lisbon", date="2026-10-01", summary="clear sky, 21.69C", is_approximate=True)],
+    )
+
+    result = _FakeCrewOutput(
+        tasks_output=[
+            _FakeTaskOutput(pydantic=real_itinerary),
+            _FakeTaskOutput(pydantic=consolidation_output),
+        ]
+    )
+
+    plan = assemble_trip_plan(result)
+
+    assert plan.weather[0].summary == "clear sky, 21.69C"
+
+
 def test_assemble_trip_plan_flags_empty_attractions_and_restaurants_as_research_gaps():
     # The real bug this closes: a London run had get_attractions() come back
     # empty and nothing downstream reacted to it, the write-up just quietly

@@ -191,13 +191,55 @@ that's exactly the mistake that created this.
   treatment (a real `output_pydantic` type, plus a line in
   `assemble_trip_plan()`), not just a mention in the consolidation task's
   own output, or it inherits this same restating risk.
-- `app.py`'s `STAGE_LABELS` list has to have exactly as many entries as
-  `build_crew(intake_plan=...)` has tasks, since `task_callback` fires once
-  per completed task and counts against that list by index. Adding a role
-  to the crew (food research did this) without adding its label here means
-  the last real stage silently stops showing a checkmark, `mark_stage_done`
-  swallows the resulting index-out-of-range case on purpose, so this fails
-  quiet, not loud, if forgotten.
+- Itinerary research and food research run concurrently now
+  (`async_execution=True` on both, `agent.py`'s `build_itinerary_task()`/
+  `build_food_task()` and their `_from_plan` counterparts), not sequentially.
+  This is the one genuinely dynamic sequencing decision in the crew, and
+  it's still code deciding, not an LLM: both tasks only read intake's
+  output, neither reads the other, confirmed directly off each task's own
+  `context` rather than guessed. Safe because of how CrewAI resolves
+  context, confirmed by reading `crewai`'s own source
+  (`crew.py`'s `_execute_tasks()`/`_get_context()`), not assumed: an
+  async task's context is read straight off the upstream Task object's
+  `.output` once that task has actually finished, not off a positional
+  accumulator, so it doesn't matter which of the two concurrent tasks
+  finishes first. Don't add `async_execution=True` to a task pair without
+  checking their `context` the same way first, two tasks that actually
+  depend on each other would race.
+- The old `app.py` `STAGE_LABELS`-by-index scheme (count `task_callback`
+  calls, match position to a fixed list) is gone, it assumed strict
+  one-after-another task order, which the async_execution change above
+  broke: `task_callback` now fires once per completed task in whichever
+  order the concurrent tasks actually finish, and it fires from that
+  task's own background thread, not `crew.kickoff()`'s thread.
+  `agent.py`'s `stage_label_for()` replaces it, matching each
+  `task_output.pydantic`'s real type against `STAGE_LABELS_BY_OUTPUT_TYPE`
+  instead of trusting call position; `PLANNING_STAGE_LABELS` is the fixed
+  reading order the UI renders in regardless of completion order. Because
+  the callback can now run on a background thread, `app.py`'s
+  `mark_stage_done()` never touches `status` or other Streamlit widgets
+  directly, Streamlit widget calls off the main thread are unsafe (missing
+  `ScriptRunContext`). It only appends to a plain list/dict under a
+  `threading.Lock`, and every widget write happens after `kickoff()`
+  returns, back on the main thread. If a new task ever gets added to the
+  crew, it needs an entry in `STAGE_LABELS_BY_OUTPUT_TYPE` (or the
+  `PRESENTATION_STAGE_LABEL` fallback if it has no `output_pydantic`), not
+  a new hardcoded position.
+- The reasoning trail (`agent.py`'s `extract_reasoning()`/
+  `reasoning_entry_for()`, surfaced in `app.py` as a collapsed "How the
+  agent got here" expander) is not `TaskOutput.raw`. For a task with
+  `output_pydantic` set, `.raw` is just that structured output restated as
+  JSON (confirmed reading `crewai`'s `task.py`: `_execute_core()` does
+  `raw = result.model_dump_json()`), the same data again, not the agent's
+  reasoning. `.messages` is where the real conversation transcript lives
+  (confirmed via `agent/utils.py`'s `save_last_messages()`), including any
+  free text the agent wrote before or between tool calls. `extract_reasoning()`
+  keeps only the assistant role's own text, in call order. This is
+  unverified by design, the same caveat this file already documents for
+  the presentation task's write-up: it's the agent's own retelling of its
+  process, shown for transparency, never something to fold into `TripPlan`
+  or trust the way a tool's structured output is trusted. Don't let it
+  drift into becoming a second, unchecked source of "facts" about the trip.
 - `Attraction.day`/`Restaurant.day` are a different kind of value from
   everything else on those models: not a tool's raw output, the
   itinerary/food agent's own reasoning about which day (1-indexed) a place
@@ -243,6 +285,39 @@ that's exactly the mistake that created this.
   bullet above. Don't raise `THIN_RESEARCH_THRESHOLD` casually, it's meant
   to catch "the tool basically came up empty," not flag every small
   destination that genuinely only has a handful of real, notable places.
+- `tripcrew/evals/` is a deepeval suite, not promptfoo, chosen over it for
+  fitting this project's existing pytest-based testing style rather than a
+  second, separate test runner and config format. `TripCrewJudgeLLM`
+  (`evals/judge_llm.py`) reuses `agent.py`'s own `build_llm()` as the judge
+  model instead of deepeval's OpenAI-account default, this project already
+  asks for one API key (`OPENAI_API_KEY`/`OPENAI_API_BASE`, pointed at
+  NVIDIA NIM), requiring a second unrelated OpenAI account just to run
+  evals would be a real cost for no benefit. `crewai.LLM(...)` is a
+  factory, not a concrete class, confirmed directly: `build_llm()`'s
+  actual return type is `crewai.llms.providers.openai.completion.OpenAICompletion`,
+  a `crewai.llms.base_llm.BaseLLM` subclass, not `crewai.llm.LLM` itself,
+  so `TripCrewJudgeLLM`/its tests check against `BaseLLM`, not `LLM`. The
+  live tests (`tests/evals/test_writeup_groundedness.py`) are marked
+  `eval` and excluded from a plain `pytest` run (`pytest.ini`'s
+  `addopts = -m "not eval"`), every other test in this project mocks its
+  network calls, these two deliberately don't, they call the real judge
+  model. Run them explicitly with `pytest -m eval`. `FaithfulnessMetric`
+  and `HallucinationMetric` want the same context data under two different
+  `LLMTestCase` fields, `retrieval_context` and `context` respectively,
+  confirmed against deepeval's own source (`_required_params` on each
+  metric), not a typo if a test sets both to the same list.
+  `HallucinationMetric`'s threshold direction changed (deepeval's own
+  deprecation notice, printed live when the test runs): 1 is a pass, 0 is
+  a failure, threshold is the minimum passing score now, the same
+  direction as every other deepeval metric, not "maximum allowed violation
+  rate" any more. Installing `deepeval` pulls in a newer `posthog` than
+  `chromadb` (a `crewai` dependency) wants, pip prints a resolver conflict
+  warning, confirmed harmless by direct testing (`crewai`, `chromadb`, and
+  `tripcrew.agent` all still import and work), not fixed by force-pinning
+  since that risks breaking either package without being able to verify
+  both configurations live. Documented here honestly rather than hidden,
+  same as every other "this is a known wrinkle, not a hidden bug" note in
+  this file.
 
 ## Architecture note: multi-agent, not single-agent
 
@@ -266,5 +341,14 @@ reasoning in `docs/architecture.rst`'s "Clarification loop" section.
 
 ## Not built yet (don't assume these exist)
 
-- promptfoo and deepeval test suites (see `evaluation/README.md` for the
-  intended split between them).
+- A real Amadeus sandbox integration for flights/hotels. Mocked data is
+  explicitly fine for now, see the "Flights and hotels are mocked on
+  purpose" bullet above, this isn't an oversight to quietly fix.
+- promptfoo. `tripcrew/evals/` uses deepeval instead, see that bullet
+  above for why. `evaluation/README.md`'s original split between the two
+  is stale now that only one got built, don't assume it still describes
+  the real setup.
+- A broader eval suite. `tests/evals/test_writeup_groundedness.py` has two
+  cases (a faithful write-up, a fabricated attraction), not an exhaustive
+  one, more fabrication shapes, a dropped research_gap, a misstated price,
+  are real future work, not something to fake just to pad test count.

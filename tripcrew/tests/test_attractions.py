@@ -11,6 +11,8 @@ WIDE_SEARCH_RADIUS_METERS) are checked without a live Geoapify call.
 import os
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from tripcrew.tools.attractions import SEARCH_RADIUS_METERS, WIDE_SEARCH_RADIUS_METERS, get_attractions
 
 
@@ -136,3 +138,55 @@ def test_geocoding_failure_returns_empty_list():
         bad_geocode.json.return_value = {"results": []}
         mock_get.side_effect = [bad_geocode]
         assert get_attractions.func(city="Nowhereville") == []
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_a_request_failure_on_the_notable_only_tier_still_falls_through_to_the_next_one():
+    # Regression test for a real structural bug: get_attractions() used to
+    # wrap all three _fetch_places calls in one try/except, so an exception
+    # on the first (most restrictive) call returned [] immediately and
+    # never attempted the unfiltered or widened-radius fallbacks. A request
+    # failure specific to one tier should be treated like an empty result
+    # from that tier, not like a reason to give up on the whole city.
+    with patch("tripcrew.tools.attractions.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _geocode_response(),
+            requests.HTTPError("400 for the wiki_and_media-conditioned request"),
+            _places_response([_feature("Belem Tower")]),  # unfiltered fallback: succeeds
+        ]
+        result = get_attractions.func(city="Lisbon")
+
+    assert mock_get.call_count == 3
+    assert [a.name for a in result] == ["Belem Tower"]
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_request_failures_on_every_tier_still_return_an_empty_list_not_raise():
+    with patch("tripcrew.tools.attractions.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _geocode_response(),
+            requests.HTTPError("boom"),
+            requests.HTTPError("boom"),
+            requests.HTTPError("boom"),
+        ]
+        assert get_attractions.func(city="Lisbon") == []
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_picks_the_most_specific_category_not_whichever_came_first():
+    # A real Lisbon run had every restaurant (and, the same underlying
+    # tool shape, every attraction) come back tagged with the generic
+    # parent category instead of the specific one the request actually
+    # filtered on -- Geoapify's categories array isn't ordered
+    # specific-first.
+    with patch("tripcrew.tools.attractions.requests.get") as mock_get:
+        feature = {
+            "properties": {
+                "name": "Sao Jorge Castle",
+                "categories": ["tourism", "tourism.sights", "tourism.sights.castle"],
+            }
+        }
+        mock_get.side_effect = [_geocode_response(), _places_response([feature])]
+        result = get_attractions.func(city="Lisbon")
+
+    assert result[0].category == "tourism.sights.castle"

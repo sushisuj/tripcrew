@@ -57,6 +57,18 @@ class AttractionsUnavailable(Exception):
     """
 
 
+def _most_specific_category(categories: list[str]) -> str | None:
+    """Geoapify's categories array lists every category a place matched,
+    not just the one the request filtered on, in no guaranteed order -- a
+    generic parent like "tourism.sights" can come before a specific child
+    like "tourism.sights.castle". Category strings are hierarchical dot
+    notation where a child's string always starts with its parent's, so the
+    longest one is reliably the most specific rather than whichever the API
+    happened to list first.
+    """
+    return max(categories, key=len) if categories else None
+
+
 def _geocode(city: str, api_key: str) -> tuple[float, float]:
     try:
         response = requests.get(
@@ -100,6 +112,26 @@ def _fetch_places(
     return response.json()["features"]
 
 
+def _safe_fetch_places(*args, **kwargs) -> list[dict]:
+    """Wraps _fetch_places so a request failure on one fallback tier falls
+    through to the next tier the same way an empty (but successful) result
+    already does, instead of aborting get_attractions()'s whole three-tier
+    react step.
+
+    Before this, a single try/except in get_attractions() wrapped all three
+    _fetch_places calls together, so an exception on the *first* (most
+    restrictive, wiki_and_media-conditioned) call returned [] immediately
+    and never even attempted the unfiltered or widened-radius searches --
+    defeating the fallback design the moment the narrowest search hit any
+    request-level problem, a real risk given it's the one call carrying an
+    extra, less-common query parameter the other two don't.
+    """
+    try:
+        return _fetch_places(*args, **kwargs)
+    except (requests.RequestException, KeyError):
+        return []
+
+
 @tool("Attraction Lookup")
 def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
     """Find notable tourist attractions in a city.
@@ -136,6 +168,13 @@ def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
     assemble_trip_plan() is what evaluates a genuinely empty result and
     reports it in TripPlan.research_gaps rather than letting it pass
     through silently.
+
+    A request-level failure (not just an empty result) on one of the three
+    tiers doesn't abort the others -- see _safe_fetch_places -- so a
+    transient problem specific to, say, the wiki_and_media-conditioned
+    first request still lets the unfiltered and widened-radius attempts
+    run rather than reporting "no attractions" for a reason that had
+    nothing to do with the destination.
     """
     api_key = os.getenv("GEOAPIFY_API_KEY")
     if not api_key:
@@ -143,15 +182,16 @@ def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
 
     try:
         lat, lon = _geocode(city, api_key)
-        features = _fetch_places(lat, lon, api_key, limit, notable_only=True)
-        if not features:
-            features = _fetch_places(lat, lon, api_key, limit, notable_only=False)
-        if not features:
-            features = _fetch_places(
-                lat, lon, api_key, limit, notable_only=False, radius_meters=WIDE_SEARCH_RADIUS_METERS
-            )
-    except (AttractionsUnavailable, requests.RequestException, KeyError):
+    except AttractionsUnavailable:
         return []
+
+    features = _safe_fetch_places(lat, lon, api_key, limit, notable_only=True)
+    if not features:
+        features = _safe_fetch_places(lat, lon, api_key, limit, notable_only=False)
+    if not features:
+        features = _safe_fetch_places(
+            lat, lon, api_key, limit, notable_only=False, radius_meters=WIDE_SEARCH_RADIUS_METERS
+        )
 
     attractions = []
     for feature in features:
@@ -162,5 +202,5 @@ def get_attractions(city: str, limit: int = 5) -> list[Attraction]:
             # not useful to hand the itinerary agent a nameless "attraction".
             continue
         categories = props.get("categories") or []
-        attractions.append(Attraction(name=name, city=city, category=categories[0] if categories else None))
+        attractions.append(Attraction(name=name, city=city, category=_most_specific_category(categories)))
     return attractions

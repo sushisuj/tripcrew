@@ -12,6 +12,8 @@ docstring for why that doesn't make sense for food.
 import os
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from tripcrew.tools.restaurants import SEARCH_RADIUS_METERS, WIDE_SEARCH_RADIUS_METERS, get_restaurants
 
 
@@ -124,3 +126,46 @@ def test_estimated_cost_is_always_unset_not_zero():
         result = get_restaurants.func(city="Lisbon")
 
     assert result[0].estimated_cost_usd is None
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_a_request_failure_on_the_normal_radius_tier_still_falls_through_to_the_widened_one():
+    # Same structural bug as attractions.py's version of this test:
+    # get_restaurants() used to wrap both _fetch_places calls in one
+    # try/except, so a request failure on the normal-radius call returned
+    # [] immediately and never attempted the widened-radius fallback.
+    with patch("tripcrew.tools.restaurants.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _geocode_response(),
+            requests.HTTPError("boom"),
+            _places_response([_feature("Cervejaria Ramiro")]),
+        ]
+        result = get_restaurants.func(city="Lisbon")
+
+    assert mock_get.call_count == 3
+    assert [r.name for r in result] == ["Cervejaria Ramiro"]
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_request_failures_on_both_tiers_still_return_an_empty_list_not_raise():
+    with patch("tripcrew.tools.restaurants.requests.get") as mock_get:
+        mock_get.side_effect = [_geocode_response(), requests.HTTPError("boom"), requests.HTTPError("boom")]
+        assert get_restaurants.func(city="Lisbon") == []
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_picks_the_most_specific_category_not_whichever_came_first():
+    # The real bug this closes: a real Lisbon run had all ten restaurants
+    # come back tagged the generic "catering" instead of the specific
+    # subcategory the request actually filtered on.
+    with patch("tripcrew.tools.restaurants.requests.get") as mock_get:
+        feature = {
+            "properties": {
+                "name": "Cervejaria Ramiro",
+                "categories": ["catering", "catering.restaurant"],
+            }
+        }
+        mock_get.side_effect = [_geocode_response(), _places_response([feature])]
+        result = get_restaurants.func(city="Lisbon")
+
+    assert result[0].category == "catering.restaurant"

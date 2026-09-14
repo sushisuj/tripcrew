@@ -59,6 +59,17 @@ class RestaurantsUnavailable(Exception):
     """
 
 
+def _most_specific_category(categories: list[str]) -> str | None:
+    """Same reasoning and fix as attractions.py's _most_specific_category:
+    Geoapify's categories array isn't ordered specific-to-generic, and a
+    real Lisbon run had every restaurant come back tagged the generic
+    "catering" even though the request filtered on catering.restaurant/
+    cafe/fast_food specifically. Category strings are hierarchical dot
+    notation, so the longest one is reliably the most specific.
+    """
+    return max(categories, key=len) if categories else None
+
+
 def _geocode(city: str, api_key: str) -> tuple[float, float]:
     try:
         response = requests.get(
@@ -89,6 +100,20 @@ def _fetch_places(lat: float, lon: float, api_key: str, limit: int, radius_meter
     # Places API returns a GeoJSON FeatureCollection, not a flat list --
     # the actual fields live under each feature's "properties".
     return response.json()["features"]
+
+
+def _safe_fetch_places(*args, **kwargs) -> list[dict]:
+    """Same fix as attractions.py's _safe_fetch_places, and for the same
+    reason: get_restaurants() used to wrap both _fetch_places calls in one
+    try/except, so a request failure on the normal-radius call would return
+    [] immediately and never attempt the widened-radius one. Wrapping each
+    call individually means a failure on one tier still falls through to
+    the next instead of aborting the whole react step.
+    """
+    try:
+        return _fetch_places(*args, **kwargs)
+    except (requests.RequestException, KeyError):
+        return []
 
 
 @tool("Restaurant Lookup")
@@ -122,6 +147,10 @@ def get_restaurants(city: str, limit: int = 5) -> list[Restaurant]:
     fill the gap. agent.py's assemble_trip_plan() is what evaluates a
     genuinely empty result and reports it in TripPlan.research_gaps rather
     than letting it pass through silently.
+
+    A request-level failure on the normal-radius attempt doesn't abort the
+    widened-radius one -- see _safe_fetch_places -- same reasoning as
+    get_attractions()'s own fallback chain.
     """
     api_key = os.getenv("GEOAPIFY_API_KEY")
     if not api_key:
@@ -129,11 +158,12 @@ def get_restaurants(city: str, limit: int = 5) -> list[Restaurant]:
 
     try:
         lat, lon = _geocode(city, api_key)
-        features = _fetch_places(lat, lon, api_key, limit)
-        if not features:
-            features = _fetch_places(lat, lon, api_key, limit, radius_meters=WIDE_SEARCH_RADIUS_METERS)
-    except (RestaurantsUnavailable, requests.RequestException, KeyError):
+    except RestaurantsUnavailable:
         return []
+
+    features = _safe_fetch_places(lat, lon, api_key, limit)
+    if not features:
+        features = _safe_fetch_places(lat, lon, api_key, limit, radius_meters=WIDE_SEARCH_RADIUS_METERS)
 
     restaurants = []
     for feature in features:
@@ -144,5 +174,5 @@ def get_restaurants(city: str, limit: int = 5) -> list[Restaurant]:
             # POIs, not useful to hand the agent a nameless "restaurant".
             continue
         categories = props.get("categories") or []
-        restaurants.append(Restaurant(name=name, city=city, category=categories[0] if categories else None))
+        restaurants.append(Restaurant(name=name, city=city, category=_most_specific_category(categories)))
     return restaurants

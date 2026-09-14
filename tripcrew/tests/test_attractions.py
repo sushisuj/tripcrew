@@ -1,15 +1,17 @@
-"""Tests for the attractions notability filter.
+"""Tests for the attractions notability filter and the widen-radius react
+step.
 
 get_attractions() isn't covered anywhere else -- only followup.py and
 pdf_export.py have tests so far. These mock requests.get so the actual
 notability logic (which condition goes on the first request, when the
-unfiltered fallback kicks in) is checked without a live Geoapify call.
+unfiltered fallback kicks in) and the radius-widening react (see
+WIDE_SEARCH_RADIUS_METERS) are checked without a live Geoapify call.
 """
 
 import os
 from unittest.mock import MagicMock, patch
 
-from tripcrew.tools.attractions import get_attractions
+from tripcrew.tools.attractions import SEARCH_RADIUS_METERS, WIDE_SEARCH_RADIUS_METERS, get_attractions
 
 
 def _geocode_response():
@@ -63,6 +65,55 @@ def test_falls_back_to_unfiltered_search_when_notable_search_is_empty():
     assert notable_call.kwargs["params"]["conditions"] == "wiki_and_media"
     assert "conditions" not in fallback_call.kwargs["params"]
     assert [a.name for a in result] == ["Local Park"]
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_widens_the_radius_once_when_the_unfiltered_search_is_also_empty():
+    # Both the notable-only and unfiltered searches come back empty here --
+    # the real gap this closes: previously that meant "no attractions,"
+    # full stop. Now there's one more attempt, at a wider radius, before
+    # giving up.
+    with patch("tripcrew.tools.attractions.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _geocode_response(),
+            _places_response([]),  # notable-only search: nothing
+            _places_response([]),  # unfiltered fallback: still nothing
+            _places_response([_feature("Distant Overlook")]),  # widened radius: found something
+        ]
+        result = get_attractions.func(city="Sparsetown")
+
+    assert mock_get.call_count == 4
+    widened_call = mock_get.call_args_list[3]
+    assert f"circle:-9.1,38.7,{WIDE_SEARCH_RADIUS_METERS}" == widened_call.kwargs["params"]["filter"]
+    assert "conditions" not in widened_call.kwargs["params"]
+    assert [a.name for a in result] == ["Distant Overlook"]
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_normal_radius_searches_use_the_normal_radius_not_the_widened_one():
+    # Sanity check that the first two requests still use SEARCH_RADIUS_METERS
+    # -- WIDE_SEARCH_RADIUS_METERS should only ever appear on the third call.
+    with patch("tripcrew.tools.attractions.requests.get") as mock_get:
+        mock_get.side_effect = [_geocode_response(), _places_response([_feature("Belem Tower")])]
+        get_attractions.func(city="Lisbon")
+
+    places_call = mock_get.call_args_list[1]
+    assert f"circle:-9.1,38.7,{SEARCH_RADIUS_METERS}" == places_call.kwargs["params"]["filter"]
+
+
+@patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})
+def test_still_returns_empty_list_if_the_widened_search_is_also_empty():
+    with patch("tripcrew.tools.attractions.requests.get") as mock_get:
+        mock_get.side_effect = [
+            _geocode_response(),
+            _places_response([]),
+            _places_response([]),
+            _places_response([]),  # widened radius: nothing either, genuinely empty
+        ]
+        result = get_attractions.func(city="Nowheresville")
+
+    assert mock_get.call_count == 4
+    assert result == []
 
 
 @patch.dict(os.environ, {"GEOAPIFY_API_KEY": "test-key"})

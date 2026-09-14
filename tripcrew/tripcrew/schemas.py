@@ -39,6 +39,17 @@ class Attraction(BaseModel):
     city: str
     category: Optional[str] = Field(default=None, description="e.g. museum, park, landmark")
     estimated_cost_usd: Optional[float] = Field(default=None)
+    day: Optional[int] = Field(
+        default=None,
+        description="Which day of the trip (1-indexed) the itinerary agent placed this on, "
+        "using the weather forecast to sequence outdoor/indoor attractions sensibly. Not from "
+        "Geoapify, get_attractions() never sets this, it's assigned by build_itinerary_task's "
+        "own reasoning after the tool call, same as the write-up's day-by-day sequencing "
+        "already was in prose, just captured as data now instead of only in the text. None "
+        "means the agent didn't confidently place it, not day 0, don't treat it as unscheduled "
+        "for day 1 specifically. agent.py's assemble_trip_plan() clears any value outside "
+        "1..TripPlan.days back to None rather than trust an out-of-range day at face value.",
+    )
 
 
 class Restaurant(BaseModel):
@@ -53,6 +64,13 @@ class Restaurant(BaseModel):
         "any more than it does for attractions, so this is always None from get_restaurants "
         "right now. Kept as a real field, not omitted, so a future source that does carry "
         "pricing doesn't need a schema change to use it.",
+    )
+    day: Optional[int] = Field(
+        default=None,
+        description="Same field as Attraction.day, same reasoning: which day (1-indexed) the "
+        "food agent placed this on, assigned after the tool call, not by get_restaurants() "
+        "itself. None means not confidently placed, and out-of-range values get cleared the "
+        "same way in assemble_trip_plan().",
     )
 
 

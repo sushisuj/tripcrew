@@ -1,8 +1,8 @@
-crewai
-crewai-tools
-litellm
-python-dotenv
-streamlit
-requests
-pydantic
-pytest
+# The real, maintained package list lives at tripcrew/requirements.txt --
+# this forwards to it instead of keeping a second copy that can drift out
+# of sync (see CLAUDE.md's "Repository layout" note for what happened the
+# last time this repo had two copies of the same file). Confirmed directly
+# that pip resolves a -r path relative to the file that contains it, not
+# the caller's working directory, so `pip install -r requirements.txt`
+# still works correctly whichever directory it's run from.
+-r tripcrew/requirements.txt

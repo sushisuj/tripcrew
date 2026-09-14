@@ -198,6 +198,27 @@ that's exactly the mistake that created this.
   the last real stage silently stops showing a checkmark, `mark_stage_done`
   swallows the resulting index-out-of-range case on purpose, so this fails
   quiet, not loud, if forgotten.
+- `Attraction.day`/`Restaurant.day` are a different kind of value from
+  everything else on those models: not a tool's raw output, the
+  itinerary/food agent's own reasoning about which day (1-indexed) a place
+  belongs on, using the weather forecast for attractions, an even spread
+  for restaurants. That means it's genuinely LLM-authored, not a restated
+  value, no conflict with the "don't trust a restated value" rule above.
+  It can still be wrong the way any model output can, so
+  `agent.py`'s `assemble_trip_plan()` clears any day outside `1..TripPlan.days`
+  back to `None` rather than show, say, "Day 7" on a 3-day trip. `None`
+  means "not confidently placed," not day 0, don't treat it as scheduled
+  for day one. `pdf_export.py` groups by day when at least one item has
+  one, and falls back to the original flat table when none do, a page
+  showing every attraction under a single "Unscheduled" heading would look
+  broken, not honest, when day assignment just isn't populated for that run.
+  The presentation task's own day-by-day write-up reads the consolidation
+  task's copy of these fields, not the corrected one `assemble_trip_plan()`
+  produces (that overwrite only happens after `crew.kickoff()` returns, the
+  presenter has already run by then), so the write-up's sequencing can
+  occasionally diverge slightly from the PDF's tables. That's not new,
+  the write-up was always the LLM's own retelling rather than grounded
+  data, treat the PDF's tables as the source of truth, not the prose.
 
 ## Architecture note: multi-agent, not single-agent
 

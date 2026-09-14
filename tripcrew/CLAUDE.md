@@ -125,6 +125,22 @@ mistake that created this, twice now.
   treatment (a real `output_pydantic` type, plus a line in
   `assemble_trip_plan()`), not just a mention in the consolidation task's
   own output, or it inherits this same restating risk.
+- Routing weather through `itinerary_research` instead of the consolidation
+  task's retelling (bullet above) fixed the *consolidation* task
+  re-authoring a clean summary, but doesn't guarantee
+  `itinerary_research.weather` itself is clean: that exact "Light rain,
+  ~22C (approximate) (approximate)" PDF happened with that fix already in
+  place, proving the itinerary task's own structured output can add
+  "(approximate)" on its own despite being told to copy `get_weather()`'s
+  text verbatim, which then doubles up with `pdf_export.py`'s own
+  unconditional `" (approximate)"` append for any
+  `WeatherReport.is_approximate` entry. `agent.py`'s
+  `_strip_approximate_marker()`, called from `assemble_trip_plan()` right
+  after the weather substitution, strips any `"(approximate)"` text out of
+  `WeatherReport.summary` before anything downstream sees it, same
+  "don't trust prompt wording for something this easy to sanitize in code"
+  rule as `_clamp_invalid_days()`. Don't add a second place that appends or
+  checks for that text without going through this function first.
 - `Attraction.day`/`Restaurant.day` are a different kind of value from
   everything else on those models: not a tool's raw output, the
   itinerary/food agent's own reasoning about which day (1-indexed) a place
@@ -173,6 +189,26 @@ mistake that created this, twice now.
   the unfiltered search if that comes back empty, which happens for
   smaller destinations with thin Wikipedia coverage. Don't drop the
   notable-first request to "simplify" this, that's the actual fix.
+- A request failure on one fallback tier isn't the same as that tier
+  coming back genuinely empty, and used to be treated as one. Both
+  `get_attractions()` and `get_restaurants()` used to wrap their whole
+  fallback chain (all three `_fetch_places` calls for attractions, both for
+  restaurants) in a single try/except, so an exception on the *first*
+  call -- the one most likely to hit a request-level problem, since it's
+  the only one carrying the extra `wiki_and_media` condition for
+  attractions -- returned `[]` immediately and never attempted the
+  remaining tiers. Found while investigating why real London and Lisbon
+  runs both came back with zero attractions despite unambiguous,
+  landmark-dense destinations -- not confirmed as the actual cause of
+  either run (this project has no way to inspect what Geoapify itself
+  returned for those two calls after the fact), but a real structural bug
+  regardless: the widen-and-retry design never got a chance to run at all
+  if anything went wrong on the narrowest search specifically.
+  `_safe_fetch_places()` in each module now wraps every individual
+  `_fetch_places` call, so a failure on one tier falls through to the next
+  the same way an empty result already does; only a geocoding failure
+  aborts the whole lookup now. Keep wrapping each tier separately if a
+  fourth one is ever added, not the whole chain in one block again.
 - An approximate forecast is not a real one. `get_weather()` still returns
   the closest available entry for a date beyond OpenWeatherMap's 5-day free
   tier window, same as before, but `WeatherReport.is_approximate` now says
@@ -198,6 +234,18 @@ mistake that created this, twice now.
   that isn't there. If real curation ever matters, that's a new evaluation
   against something like Foursquare's ratings-bearing tier, not a filter
   to bolt onto this tool.
+- `Attraction.category`/`Restaurant.category` used to be `categories[0]`,
+  whichever category Geoapify happened to list first for a place. A real
+  Lisbon run had all ten restaurants come back tagged the generic
+  `"catering"` even though the request filtered on
+  `catering.restaurant`/`cafe`/`fast_food` specifically -- Geoapify's
+  `categories` array isn't ordered specific-first. Both `attractions.py`
+  and `restaurants.py` now have their own `_most_specific_category()`,
+  picking the longest string in the array instead of the first one, since
+  a child category's string always starts with its parent's in Geoapify's
+  dot notation (`"tourism.sights.castle"` starts with `"tourism.sights"`
+  starts with `"tourism"`), so length is a reliable specificity signal
+  without needing Geoapify's own category tree hardcoded here.
 - `estimate_budget()` takes `restaurants` as a required argument alongside
   flights, hotel, and attractions, and `Budget` has a `restaurants_usd`
   field. Same unpriced-category handling as attractions: Geoapify doesn't
@@ -221,13 +269,24 @@ mistake that created this, twice now.
   that were the whole story. `research_gaps` isn't authored by any task's
   own LLM, same as `attractions`/`weather`/`restaurants` themselves,
   `assemble_trip_plan()` overwrites it fresh every time. `app.py`'s
-  sidebar (`render_sidebar()`) is the reliable place a traveler actually
-  sees it today; the presentation task is told to mention it too, but it's
-  reading the consolidation task's own (always-empty, at that point in the
-  chain) copy of the field, same timing caveat as the day-by-day write-up
-  bullet above. Don't raise `THIN_RESEARCH_THRESHOLD` casually, it's meant
-  to catch "the tool basically came up empty," not flag every small
-  destination that genuinely only has a handful of real, notable places.
+  sidebar (`render_sidebar()`) and `pdf_export.py`'s "Research Gaps"
+  section are both the real, corrected field now; the presentation task is
+  told to mention it too, but it's reading the consolidation task's own
+  (always-empty, at that point in the chain) copy of the field, same
+  timing caveat as the day-by-day write-up bullet above. Don't raise
+  `THIN_RESEARCH_THRESHOLD` casually, it's meant to catch "the tool
+  basically came up empty," not flag every small destination that
+  genuinely only has a handful of real, notable places.
+- `pdf_export.py` had zero references to `research_gaps` until a real test
+  run showed why that's a problem: the sidebar had the real, corrected gap
+  list, but the downloadable PDF -- which is what a traveler actually keeps
+  or shares -- didn't carry it at all, even though the presentation
+  write-up sometimes reinvents its own informal version of the same
+  observation (that's the LLM noticing an empty list on its own, not this
+  real field, and it runs before `assemble_trip_plan()`'s correction
+  besides, see the day-by-day write-up bullet above). `build_trip_pdf()`
+  now renders a "Research Gaps" section straight from `TripPlan.research_gaps`,
+  only when it's non-empty, same condition the sidebar already used.
 
 ### Crew orchestration: sequencing and status reporting
 
@@ -293,6 +352,23 @@ mistake that created this, twice now.
   on Paragraph text only, escaping a Table cell produces a literal
   `-&gt;` on the page. Confirmed by rendering a sample and reading it back,
   not just eyeballing the build succeeding.
+- reportlab's base Helvetica font only covers WinAnsiEncoding (roughly
+  CP1252), not full Unicode. A real PDF rendered "Check-in" as
+  "Check[missing-glyph-box]in" in the write-up text because the presenter
+  LLM used some character outside that set (likely a non-breaking hyphen)
+  there instead of a plain hyphen -- confirmed the corruption is baked into
+  the PDF's own content stream via an independent `pypdf` extraction, not a
+  reading artifact, though the exact original character can't be recovered
+  after the fact since pypdf itself reports a placeholder (`■`) for
+  any glyph with no usable mapping. `_sanitize_for_pdf()` maps the specific
+  characters an LLM is known to reach for (non-breaking hyphen, narrow
+  no-break space before a unit symbol, minus sign, etc.) back to a safe
+  equivalent, then falls back to NFKD+CP1252 for anything else, applied to
+  `write_up` only -- the one field here that's raw LLM prose rather than a
+  tool's own data (flights/hotel are mocked, attraction/restaurant names
+  come from Geoapify). Genuinely accented real names (`"Café Batata"`) are
+  already in WinAnsi and pass through untouched; don't broaden this to
+  "just transliterate everything to ASCII."
 - `tripcrew/followup.py` is the same "not an agent tool" case as
   `pdf_export.py`, plus one more rule specific to it: the LLM call in there
   (`build_intent_task`, `output_pydantic=TripQuestionIntent`) is only ever

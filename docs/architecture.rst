@@ -149,6 +149,36 @@ than present it as complete.
 Flights and hotels don't need any of this, they're mocked, pure in-memory
 generation with no I/O to fail.
 
+One more failure-handling gap, found while investigating why real London
+and Lisbon runs both came back with zero attractions despite being
+unambiguous, landmark-dense destinations (not confirmed as the actual
+cause of either run, there's no way to inspect what Geoapify itself
+returned for those calls after the fact, but a real bug regardless):
+``get_attractions()``'s three-tier fallback (notable-only, then unfiltered,
+then unfiltered at a wider radius) and ``get_restaurants()``'s two-tier one
+used to wrap their *entire* chain of ``_fetch_places`` calls in a single
+try/except. An exception on the first call -- the one most likely to hit a
+request-level problem, since for attractions it's the only one carrying
+the extra ``wiki_and_media`` condition -- returned ``[]`` immediately and
+never attempted the remaining tiers, silently defeating the whole
+widen-and-retry design the moment the narrowest search hit any problem.
+Both tools now have a ``_safe_fetch_places()`` that wraps each individual
+call instead, so a failure on one tier falls through to the next the same
+way an empty (but successful) result already does. Only a geocoding
+failure aborts the lookup entirely now.
+
+A smaller, fully source-confirmed gap in the same two tools:
+``Attraction.category``/``Restaurant.category`` used to be
+``categories[0]``, whichever category Geoapify happened to list first. A
+real Lisbon run had all ten restaurants come back tagged the generic
+``"catering"`` even though the request filtered on
+``catering.restaurant``/``cafe``/``fast_food`` specifically, since
+Geoapify's ``categories`` array isn't ordered specific-first. Both tools
+now pick the longest string in the array instead -- Geoapify's dot
+notation means a child category's string always starts with its parent's,
+so length is a reliable specificity signal without hardcoding Geoapify's
+own category tree here.
+
 The consolidation task used to have the same problem in a quieter form:
 ``output_pydantic=TripPlan`` and no tools meant ``Budget.total_usd`` in the
 final plan was written by the LLM from context, not computed at all,
@@ -209,6 +239,21 @@ flights, hotel, destination, and open_questions are still trusted as its
 own output, only the three research-derived list fields get the
 override, and only because a real bug proved the restating step corrupts
 them.
+
+Routing weather through ``ItineraryResearch`` fixed the consolidation task
+re-authoring a clean summary, but not the deeper problem: it doesn't
+guarantee ``ItineraryResearch.weather`` itself is clean. The exact "Light
+rain, ~22C (approximate) (approximate)" case above happened with that fix
+already in place, proving the itinerary task's own structured output can
+add "(approximate)" on its own despite being told to copy
+``get_weather()``'s text verbatim -- which then doubles up with
+``pdf_export.py``'s own unconditional ``" (approximate)"`` append for any
+``WeatherReport.is_approximate`` entry. ``agent.py``'s
+``_strip_approximate_marker()``, called from ``assemble_trip_plan()``
+right after the weather substitution, strips that text out of
+``WeatherReport.summary`` before anything downstream sees it, in code, the
+same "don't trust prompt wording for something this easy to sanitize"
+instinct as the day-clamping below.
 
 Day-by-day sequencing
 -------------------------
@@ -306,6 +351,16 @@ but reads the consolidation task's own (always-empty, at that point in the
 chain) copy of the field, the same timing limitation "Day-by-day
 sequencing" above documents for ``day``: the real evaluation only happens
 after ``crew.kickoff()`` returns, once the presenter has already run.
+
+Until a real test run pointed it out, the sidebar was the *only* place a
+traveler actually saw it: ``pdf_export.py`` had zero references to
+``research_gaps``, so a downloaded PDF never carried the signal at all,
+even though the presentation write-up sometimes reinvents its own
+informal version of the same observation (the LLM noticing an empty list
+on its own, not this real field, and subject to the same timing caveat
+above). ``build_trip_pdf()`` now renders a "Research Gaps" section
+straight from ``TripPlan.research_gaps``, only when it's non-empty, same
+condition the sidebar already used.
 
 Running itinerary and food research concurrently
 --------------------------------------------------
@@ -535,6 +590,28 @@ with ``pypdf``, not by the build succeeding without raising, since an
 unescaped ``<`` or ``&`` reaching a ``Paragraph`` *would* raise, which is
 what made the bug easy to miss at first: escaping felt like the safe
 default everywhere.
+
+A second real bug, same "reportlab isn't as forgiving as it looks"
+category: its base Helvetica font only covers WinAnsiEncoding (roughly
+CP1252), not full Unicode. A real PDF rendered "Check-in" as
+"Check[missing-glyph-box]in" in the write-up text because the presenter
+LLM used some character outside that set there (likely a non-breaking
+hyphen) instead of a plain hyphen. Confirmed the corruption is baked into
+the PDF's own content stream via an independent ``pypdf`` extraction, not
+a reading artifact, though the exact original character can't be
+recovered after the fact, ``pypdf`` itself reports a placeholder
+(``■``) for any glyph with no usable mapping, the same placeholder
+regardless of what the real character was. ``_sanitize_for_pdf()`` maps
+the specific characters an LLM is known to reach for (a non-breaking
+hyphen, a narrow no-break space before a unit symbol, a minus sign, and a
+few others) back to a safe equivalent, then falls back to NFKD
+normalization plus CP1252 encoding for anything else, dropping what's
+still left rather than handing reportlab a character it can only draw as
+a box. Applied to ``write_up`` only, the one field here that's raw LLM
+prose rather than a tool's own data, flights and hotels are mocked,
+attraction and restaurant names come from Geoapify. Genuinely accented
+real names ("Café Batata") are already inside WinAnsi and pass through
+untouched.
 
 Follow-up chatbot
 --------------------

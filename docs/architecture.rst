@@ -201,6 +201,50 @@ own output, only the three research-derived list fields get the
 override, and only because a real bug proved the restating step corrupts
 them.
 
+Day-by-day sequencing
+-------------------------
+
+``Attraction`` and ``Restaurant`` both carry a ``day`` field (1-indexed,
+``schemas.py``), turning "3-day trip" from a label on ``TripPlan.days``
+into something the itinerary actually structures around. Before this,
+sequencing across days only ever existed as prose the presentation agent
+wrote, using the weather context in its own context window, nothing
+downstream (the PDF, the follow-up chatbot) could rely on which day
+anything belonged to.
+
+Unlike the fields ``assemble_trip_plan()`` overwrites (see above), ``day``
+isn't a tool's raw output being restated, ``get_attractions()`` and
+``get_restaurants()`` don't know about days at all. It's the itinerary and
+food agents' own reasoning, informed by the weather forecast for
+attractions and a plain even spread for restaurants, assigned once as part
+of authoring ``ItineraryResearch``/``FoodResearch``. That makes it a
+genuinely agent-authored value, not a groundedness violation the way
+restating an already-known fact would be, but it's still a number a model
+can get wrong the way any generated output can. ``assemble_trip_plan()``
+clears any day outside ``1..TripPlan.days`` back to ``None`` rather than
+show an impossible day on the finished plan, the same "verify what's
+checkable, even from an agent's own reasoning" instinct as everything else
+this project won't take on faith.
+
+``pdf_export.py`` groups attractions and restaurants under a "Day N"
+heading once at least one item has a day set, with anything left unset
+gathered under an "Unscheduled" heading below the day groups. If nothing
+has a day at all, it falls back to the original flat table rather than a
+page showing everything under one "Unscheduled" heading, day assignment
+being unpopulated for a given run should look like the feature not firing,
+not like the trip is disorganized.
+
+One real limitation, not hidden: the presentation task's write-up reads
+the consolidation task's own copy of ``attractions``/``restaurants``, not
+the corrected one ``assemble_trip_plan()`` produces, because that
+correction only runs after ``crew.kickoff()`` returns and the presenter
+has already finished by then. So the write-up's day-by-day framing can
+occasionally disagree with the PDF's tables in a way that's hard to fully
+close without restructuring when ``assemble_trip_plan()`` runs relative to
+presentation. Not a new gap, the write-up was always the LLM's own
+retelling rather than grounded data. The PDF's tables are the source of
+truth, the write-up is presentation.
+
 PDF export
 -------------
 

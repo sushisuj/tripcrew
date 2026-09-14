@@ -1,10 +1,15 @@
 Architecture
 ============
 
-This page is a skeleton. Real architecture diagrams come once the planning
-loop and clarification flow are actually built -- documenting a design
-that's still moving isn't worth much yet. What follows is the current
-intent, not a finished design.
+This describes the system as it's actually built, not a plan for one: the
+five-role crew, the clarification loop, and everything below is wired in
+and covered by real tests, not a sketch waiting on a diagram. Described in
+prose on purpose, not as a diagram. Most of what matters on this page is
+why a decision was made (a real bug a design choice fixed, a tradeoff
+confirmed against CrewAI's own source rather than assumed), not just the
+shape of the pipeline, and that reasoning is what a diagram would end up
+captioning anyway. Prose carries it directly instead of splitting it
+across boxes and footnotes.
 
 .. contents:: On this page
    :local:

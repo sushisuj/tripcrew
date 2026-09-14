@@ -30,6 +30,14 @@ def test_trip_plan_defaults_to_no_open_questions():
     assert plan.flights == []
 
 
+def test_trip_plan_defaults_to_no_research_gaps():
+    # research_gaps is computed by agent.py's assemble_trip_plan(), never
+    # authored directly -- a fresh TripPlan (a draft, or a test fixture)
+    # should start with nothing flagged, same reasoning as open_questions.
+    plan = TripPlan(destination="Paris", days=3)
+    assert plan.research_gaps == []
+
+
 def test_flight_requires_a_source():
     flight = Flight(
         origin="LHR",

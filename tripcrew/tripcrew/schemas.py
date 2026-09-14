@@ -157,6 +157,18 @@ class TripPlan(BaseModel):
         description="Anything the agent needed from the user but didn't have -- "
         "populated instead of guessing",
     )
+    research_gaps: list[str] = Field(
+        default_factory=list,
+        description="Categories where the research tools came back empty or with too "
+        "few results to plan around (attractions, restaurants, weather), even after "
+        "get_attractions()/get_restaurants() widened their own search radius once (see "
+        "those tools' docstrings). Not the same thing as open_questions: open_questions "
+        "is what the traveler didn't tell the intake agent, this is what a tool "
+        "genuinely couldn't find once it looked. Computed by agent.py's "
+        "assemble_trip_plan(), not authored by any task's own LLM, same reasoning as "
+        "attractions/weather/restaurants themselves: a count is a checkable fact once "
+        "the real research is in hand, not something to trust a restated guess about.",
+    )
 
 
 class TripQuestionIntent(BaseModel):

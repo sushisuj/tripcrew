@@ -232,6 +232,11 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
     TripPlan.attractions/weather -- that restating step is where a real
     London run picked up a corrupted weather summary. See
     ItineraryResearch's own docstring in schemas.py.
+
+    Also where Attraction.day gets assigned (see that field's docstring):
+    this task's own reasoning about which day suits which attraction used
+    to only ever reach the traveler as prose in the final write-up, this
+    is that same reasoning captured as data instead.
     """
     return Task(
         description=(
@@ -246,12 +251,20 @@ def build_itinerary_task(agent: Agent, intake_task: Task) -> Task:
             "forecast for that day isn't out yet), don't present it as an "
             "exact forecast. Report the attractions and weather exactly as "
             "the tools returned them -- don't reword or summarize a weather "
-            "summary string, copy it as given."
+            "summary string, copy it as given. For each attraction, set "
+            "its day to a number from 1 to the trip's total number of days "
+            "(from the intake research), sequencing outdoor attractions on "
+            "better-weather days where the forecast actually supports that "
+            "call. Leave day unset for an attraction if you're not "
+            "confident where it fits, an unset day is honest, a guessed "
+            "one isn't."
         ),
         expected_output=(
             "The attractions and weather forecast the tools actually "
             "returned, as structured data, empty lists where a tool came "
-            "back empty rather than an invented substitute."
+            "back empty rather than an invented substitute, and a day "
+            "assigned to each attraction wherever the forecast gave a real "
+            "basis for placing it."
         ),
         agent=agent,
         context=[intake_task],
@@ -314,7 +327,12 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     get_weather() itself, since the tool has no way to know what date it
     *should* have been called with, only what it was given.
 
-    output_pydantic=ItineraryResearch, same reasoning as build_itinerary_task.
+    output_pydantic=ItineraryResearch, same reasoning as build_itinerary_task,
+    including day assignment on each attraction (see Attraction.day's
+    docstring in schemas.py) -- phrased with the real day count baked in
+    below instead of "the trip's total number of days" the way
+    build_itinerary_task has to phrase it, since this variant already has
+    the real value on hand.
     """
     date_range = _trip_date_range(intake_plan)
     return Task(
@@ -334,12 +352,19 @@ def build_itinerary_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
             "forecast for that day isn't out yet), don't present it as an "
             "exact forecast. Report the attractions and weather exactly as "
             "the tools returned them -- don't reword or summarize a weather "
-            "summary string, copy it as given."
+            f"summary string, copy it as given. For each attraction, set its "
+            f"day to a number from 1 to {intake_plan.days}, sequencing "
+            "outdoor attractions on better-weather days where the forecast "
+            "actually supports that call. Leave day unset for an attraction "
+            "if you're not confident where it fits, an unset day is honest, "
+            "a guessed one isn't."
         ),
         expected_output=(
             "The attractions and weather forecast the tools actually "
             "returned, as structured data, empty lists where a tool came "
-            "back empty rather than an invented substitute."
+            "back empty rather than an invented substitute, and a day "
+            "assigned to each attraction wherever the forecast gave a real "
+            "basis for placing it."
         ),
         agent=agent,
         output_pydantic=ItineraryResearch,
@@ -356,6 +381,11 @@ def build_food_task(agent: Agent, intake_task: Task) -> Task:
     has output_pydantic=ItineraryResearch: get_restaurants()'s real return
     value should survive to assemble_trip_plan() untouched, not get
     re-authored by the consolidation task's LLM.
+
+    Also assigns Restaurant.day, same field and same reasoning as
+    Attraction.day (schemas.py), but this agent has no weather signal to
+    reason from the way the itinerary agent does, so its job is just an
+    even spread across the trip's days, not weather-aware sequencing.
     """
     return Task(
         description=(
@@ -368,12 +398,18 @@ def build_food_task(agent: Agent, intake_task: Task) -> Task:
             "empty result rather than an error when it can't actually look "
             "something up -- treat an empty result as 'not available for "
             "this trip,' don't invent a plausible-sounding restaurant to "
-            "fill the gap."
+            "fill the gap. Spread the restaurants across the trip's total "
+            "number of days (from the intake research) by setting each "
+            "one's day to a number from 1 to that total, so the traveler "
+            "isn't left with every option dumped on one day. Leave day "
+            "unset for a restaurant only if there are too few to spread "
+            "sensibly, don't force a day onto something that doesn't need one."
         ),
         expected_output=(
             "The restaurants and cafes the tool actually returned, as "
             "structured data, an empty list rather than an invented "
-            "substitute if the tool came back empty."
+            "substitute if the tool came back empty, spread across the "
+            "trip's days rather than left unassigned."
         ),
         agent=agent,
         context=[intake_task],
@@ -387,7 +423,8 @@ def build_food_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
     date-baking approach as build_itinerary_task_from_plan and for the same
     reason: there's no intake_task in this crew to chain context from.
 
-    output_pydantic=FoodResearch, same reasoning as build_food_task.
+    output_pydantic=FoodResearch, same reasoning as build_food_task,
+    including day assignment with the real day count baked in below.
     """
     date_range = _trip_date_range(intake_plan)
     return Task(
@@ -402,12 +439,19 @@ def build_food_task_from_plan(agent: Agent, intake_plan: TripPlan) -> Task:
             "rated when the tool didn't say so. It returns an empty result "
             "rather than an error when it can't actually look something up "
             "-- treat an empty result as 'not available for this trip,' "
-            "don't invent a plausible-sounding restaurant to fill the gap."
+            "don't invent a plausible-sounding restaurant to fill the gap. "
+            f"Spread the restaurants across the trip's {intake_plan.days} "
+            "days by setting each one's day to a number from 1 to "
+            f"{intake_plan.days}, so the traveler isn't left with every "
+            "option dumped on one day. Leave day unset for a restaurant "
+            "only if there are too few to spread sensibly, don't force a "
+            "day onto something that doesn't need one."
         ),
         expected_output=(
             "The restaurants and cafes the tool actually returned, as "
             "structured data, an empty list rather than an invented "
-            "substitute if the tool came back empty."
+            "substitute if the tool came back empty, spread across the "
+            "trip's days rather than left unassigned."
         ),
         agent=agent,
         output_pydantic=FoodResearch,
@@ -494,7 +538,21 @@ def build_consolidation_task_from_plan(
 
 
 def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
-    """Depends on the consolidated TripPlan. Last task in the chain."""
+    """Depends on the consolidated TripPlan. Last task in the chain.
+
+    One real limitation worth knowing if this gets touched: this task
+    reads the consolidation task's own attractions/weather/restaurants as
+    context, the same fields assemble_trip_plan() (agent.py) later
+    overwrites with itinerary_task's and food_task's real output, because
+    that overwrite only happens after crew.kickoff() returns, this task
+    has already run by then. So the write-up's day-by-day structure comes
+    from the consolidation task's own (less trustworthy) copy, while the
+    PDF's day-by-day tables (pdf_export.py) come from the corrected one
+    app.py actually uses. That's not a new gap this task introduces, the
+    write-up's sequencing was always the LLM's own retelling rather than
+    grounded data, same as the whole reason assemble_trip_plan() exists.
+    The write-up is presentation, the PDF's tables are the source of truth.
+    """
     return Task(
         description=(
             "Turn the consolidated TripPlan into a clear, practical "
@@ -506,11 +564,16 @@ def build_presentation_task(agent: Agent, consolidation_task: Task) -> Task:
             "say plainly that the total doesn't include those categories, "
             "don't present it as a complete number. If any weather report "
             "has is_approximate set, say plainly that day's forecast is an "
-            "estimate, not a real forecast for that date."
+            "estimate, not a real forecast for that date. Where an "
+            "attraction or restaurant has a day set, structure the write-up "
+            "around those days (Day 1, Day 2, and so on); if day isn't set "
+            "for something, mention it without forcing it onto a day you're "
+            "not confident about."
         ),
         expected_output=(
             "A readable trip plan write-up covering flights, hotel, "
-            "attractions, restaurants, weather, and budget."
+            "attractions, restaurants, weather, and budget, organized by "
+            "day wherever the plan's own day fields support that."
         ),
         agent=agent,
         context=[consolidation_task],
@@ -637,6 +700,16 @@ def assemble_trip_plan(result: CrewOutput) -> TripPlan | None:
     Returns None if no TripPlan is found at all, which shouldn't happen in
     normal operation but stays defensive rather than raising, matching the
     prior inline check this replaces.
+
+    Also clamps Attraction.day/Restaurant.day: unlike the rest of what this
+    function copies over, day isn't a tool's raw output, it's the
+    itinerary/food agent's own reasoning about which day something belongs
+    on (see Attraction.day's docstring in schemas.py), so it's a genuinely
+    LLM-authored value, not a restated one, no groundedness issue with
+    trusting it in principle. But it's still a number the model could get
+    wrong the same way it could invent anything else, and TripPlan.days is
+    known for certain by this point, so any day outside 1..days gets reset
+    to None here rather than shown as, say, "Day 7" on a 3-day trip.
     """
     consolidated_plan = next(
         (t.pydantic for t in result.tasks_output if isinstance(t.pydantic, TripPlan)),
@@ -660,4 +733,20 @@ def assemble_trip_plan(result: CrewOutput) -> TripPlan | None:
     if food_research is not None:
         consolidated_plan.restaurants = food_research.restaurants
 
+    _clamp_invalid_days(consolidated_plan.attractions, consolidated_plan.days)
+    _clamp_invalid_days(consolidated_plan.restaurants, consolidated_plan.days)
+
     return consolidated_plan
+
+
+def _clamp_invalid_days(items: list, days: int) -> None:
+    """Resets .day to None on any item whose day falls outside 1..days,
+    in place. Shared by assemble_trip_plan() for both attractions and
+    restaurants, Attraction and Restaurant aren't a common pydantic base
+    class, just two models that both happen to carry a `day` field, so
+    this takes a plain list and relies on duck typing rather than a shared
+    type hint.
+    """
+    for item in items:
+        if item.day is not None and not (1 <= item.day <= days):
+            item.day = None

@@ -56,6 +56,31 @@ write to a `docs/` path assuming this file's own directory is the project
 root, check that assumption against the actual repo structure first,
 that's exactly the mistake that created this.
 
+The same "two copies, only one real" mistake recurred for `README.md` and
+`requirements.txt`, caught and fixed while checking the repo over before a
+submission. A repo-root `README.md` and `requirements.txt` existed from
+before the `tripcrew/tripcrew/` restructure, alongside real, actively
+maintained copies under `tripcrew/`, and drifted apart the same way `docs/`
+did, months apart: the root README still described four agents (food
+research "deferred") and OpenTripMap, long after there were five agents,
+Geoapify, PDF export, a follow-up chatbot, and more. Nobody caught it
+because doc updates kept landing in this file and `docs/architecture.rst`,
+never `README.md`. The root copy is also what actually renders on the
+repo's front page, so it was the more visible one, and the more wrong one.
+Consolidated the same way `docs/` was: the repo-root `README.md` is now the
+one current, canonical README, `tripcrew/README.md` is gone rather than
+kept as a second copy that can drift again. The repo-root `requirements.txt`
+is now a one-line forward (`-r tripcrew/requirements.txt`), not a second
+package list to hand-sync, confirmed directly that pip resolves a `-r`
+path relative to the file that contains it, not the caller's cwd, so this
+works whichever directory `pip install` is actually run from. A dead
+`tests/__init__.py` sitting at the repo root, sibling to the real suite
+under `tripcrew/tests/`, from the same pre-restructure layout, is gone too.
+If a README or requirements edit is about to land only under `tripcrew/`,
+or a stray top-level file looks like it might duplicate something real one
+level down, check the repo-root layout directly first, that's exactly the
+mistake that created this, twice now.
+
 ## Project conventions
 
 ### Groundedness: don't trust an LLM to restate or compute what it already has

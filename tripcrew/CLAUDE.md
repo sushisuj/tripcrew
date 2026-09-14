@@ -34,6 +34,28 @@ Sujan's voice, not generic AI-assistant prose. Specifics:
   built yet is worth more than a confident-sounding README that overstates
   what's working.
 
+## Repository layout: two `docs/` folders existed, only one is real
+
+`docs/` at the repo root (sibling to this `tripcrew/` directory, i.e.
+`Travel Planner/docs/`) is the actual Sphinx project. `conf.py`,
+`index.rst`, `_static/`, `requirements.txt`, and the repo-root
+`.readthedocs.yaml` (`sphinx: configuration: docs/conf.py`) only exist
+there, and `index.rst`'s toctree is what actually pulls in
+`getting-started` and `architecture`. A second `tripcrew/docs/` folder
+existed alongside it with no Sphinx scaffolding of its own, not referenced
+by any toctree, invisible to a Read the Docs build even if one were live.
+It ended up with newer content than the real one purely by accident: work
+done from inside a copy of this `tripcrew/` folder (this file included)
+naturally treats paths as relative to that folder, so doc edits landed in
+the orphan instead of the real site, and the real `docs/architecture.rst`
+and `docs/getting-started.rst` went stale while the orphan kept getting
+updated. Migrated the current content into the real `docs/` and removed
+`tripcrew/docs/` entirely. If `docs/architecture.rst` or
+`docs/getting-started.rst` ever look stale again, or a change is about to
+write to a `docs/` path assuming this file's own directory is the project
+root, check that assumption against the actual repo structure first,
+that's exactly the mistake that created this.
+
 ## Project conventions
 
 - Tool outputs are pydantic models (see `tripcrew/schemas.py`), not free
